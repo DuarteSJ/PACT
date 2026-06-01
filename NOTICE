@@ -1,0 +1,28 @@
+PACT — A Criticality-First Design for Tiered Memory
+Copyright (c) 2026 MoatLab, Virginia Tech.
+
+This product includes software developed by the PACT team, released under the
+MIT License (see LICENSE).
+
+It also bundles the following third-party components, each under its own
+license. These files are unmodified (or only trivially adapted) and retain
+their original copyright and license headers.
+
+------------------------------------------------------------------------------
+Component:  khashl.h  (generic hash table)
+Location:   src/khashl.h
+Author:     Attractive Chaos <attractor@live.co.uk>
+License:    MIT License
+------------------------------------------------------------------------------
+Component:  minicoro.h  (stackful coroutine library)
+Location:   src/minicoro.h
+Author:     Eduardo Bart (https://github.com/edubart/minicoro)
+License:    Public Domain or MIT-0 (No Attribution), at your option
+------------------------------------------------------------------------------
+
+Linux kernel patches and out-of-tree kernel modules under baselines/ and
+setup/ (the kernel modules under setup/kernel/ and the perf patch under
+setup/perf/) are derivative works of the Linux kernel and are licensed under
+GPL-2.0, matching the kernel they modify. The upstream tiering systems they
+reproduce (TPP, Memtis, Colloid, NBT, Nomad, Soar/Alto) are the work of their
+respective authors; see each subdirectory's README for provenance.

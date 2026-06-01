@@ -1,0 +1,905 @@
+/* SPDX-License-Identifier: MIT */
+/* Copyright (c) 2026 MoatLab, Virginia Tech. */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <asm/unistd.h>
+#include <sys/mman.h>
+#include <errno.h>
+#include <sys/syscall.h>
+#include <sys/ioctl.h>
+#include <linux/perf_event.h>
+#include <assert.h>
+#include <dirent.h>
+#include <numa.h>
+#include <numaif.h>
+#include <time.h>
+
+#include "constants.h"
+#include "pact.h"
+#include "pmu.h"
+#include "perf.h"
+#include "error.h"
+
+/* Event configuration table for core/thread counting events.
+ * Populated at runtime by pmu_platform_init(). */
+event_config_t core_event_configs[CORE_EVENT_COUNT];
+
+int validate_hardware_access(void)
+{
+    /* Initialize NUMA */
+    if (numa_available() < 0) {
+        log_warning("validate_hardware_access", "NUMA not available, migrations will be simulated");
+        return 0;
+    }
+
+    /* Check if we have the necessary permissions for hardware counters */
+    if (geteuid() != 0) {
+        log_warning("validate_hardware_access",
+                    "Running without root privileges - hardware counters may not be accessible");
+        return 0; /* Not fatal, but degraded functionality */
+    }
+
+    /* Check if /proc/sys/kernel/perf_event_paranoid allows access */
+    FILE *paranoid_file = fopen("/proc/sys/kernel/perf_event_paranoid", "r");
+    if (paranoid_file) {
+        int paranoid_level;
+        if (fscanf(paranoid_file, "%d", &paranoid_level) == 1) {
+            if (paranoid_level > 1) {
+                log_warning("validate_hardware_access",
+                            "perf_event_paranoid level is high - some counters may be restricted");
+            }
+        }
+        fclose(paranoid_file);
+    }
+
+    return 1; /* Success */
+}
+
+long perf_event_open(struct perf_event_attr *hw_event, pid_t pid, int cpu, int group_fd,
+                     unsigned long flags)
+{
+    return syscall(__NR_perf_event_open, hw_event, pid, cpu, group_fd, flags);
+}
+
+/* Function to discover CHA PMUs for target CPUs only */
+typedef struct {
+    int cha_id;
+    int pmu_type;
+    char device_name[64];
+} cha_discovery_t;
+
+/* Zero-init every cha_pmu_info_t slot to "unused" sentinels (-1 IDs, -1 fds). */
+static void cha_pmus_clear_slots(cha_pmu_info_t *cha_pmus)
+{
+    for (int i = 0; i < MAX_CHAS; i++) {
+        cha_pmus[i].cha_id = -1;
+        cha_pmus[i].pmu_type = -1;
+        cha_pmus[i].core_id = -1;
+        cha_pmus[i].device_name[0] = '\0';
+        for (int j = 0; j < 4; j++) {
+            cha_pmus[i].group_fast.fds[j] = -1;
+            cha_pmus[i].group_slow.fds[j] = -1;
+            cha_pmus[i].group_fast.ids[j] = -1;
+            cha_pmus[i].group_slow.ids[j] = -1;
+        }
+    }
+}
+
+/* Read PMU type for a single uncore_cha_* device and record it into the
+ * discovered[] buffer. Returns true on success. */
+static bool record_cha_device(const char *dev_name, int cha_id, cha_discovery_t *out)
+{
+    char path[256];
+    int ret = snprintf(path, sizeof(path), "/sys/devices/%s/type", dev_name);
+    if (ret >= (int)sizeof(path)) {
+        log_warning("detect_cha_pmus", "Path too long for device %s, skipping", dev_name);
+        return false;
+    }
+    FILE *fp = fopen(path, "r");
+    if (!fp) {
+        exit(EXIT_FAILURE); /* preserved: legacy behavior on /sys read failure */
+    }
+    int pmu_type;
+    bool ok = (fscanf(fp, "%d", &pmu_type) == 1);
+    fclose(fp);
+    if (!ok) {
+        return false;
+    }
+    out->cha_id = cha_id;
+    out->pmu_type = pmu_type;
+    strncpy(out->device_name, dev_name, sizeof(out->device_name) - 1);
+    out->device_name[sizeof(out->device_name) - 1] = '\0';
+    return true;
+}
+
+/* Discover all uncore_cha_* devices under /sys/devices. Fills the discovered[]
+ * buffer and returns count. */
+static int discover_all_cha_devices(cha_discovery_t *discovered)
+{
+    DIR *dir = opendir("/sys/devices");
+    if (!dir) {
+        perror("Failed to open /sys/devices");
+        return -1;
+    }
+    int n = 0;
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if (strncmp(entry->d_name, "uncore_cha_", 11) != 0) {
+            continue;
+        }
+        int cha_id = atoi(entry->d_name + 11);
+        if (cha_id < 0 || cha_id >= MAX_CHAS) {
+            log_warning("detect_cha_pmus", "CHA ID %d is out of bounds (0-%d), skipping", cha_id,
+                        MAX_CHAS - 1);
+            exit(EXIT_FAILURE);
+        }
+        if (record_cha_device(entry->d_name, cha_id, &discovered[n])) {
+            n++;
+        }
+    }
+    closedir(dir);
+    return n;
+}
+
+/* Find the smallest pmu_type — used as the origin for CHA-offset → core
+ * mapping in g_pmu_platform.cha_to_core_map. */
+static int find_base_pmu_type(const cha_discovery_t *discovered, int n)
+{
+    int base = INT_MAX;
+    for (int i = 0; i < n; i++) {
+        if (discovered[i].pmu_type < base) {
+            base = discovered[i].pmu_type;
+        }
+    }
+    return base;
+}
+
+/* Filter the discovered CHAs by cpu_mask and populate cha_pmus[] for the
+ * active set. Returns count of active CHAs and writes count of skipped. */
+static int filter_active_chas(const cha_discovery_t *discovered, int n_discovered,
+                              int base_pmu_type, uint64_t cpu_mask, cha_pmu_info_t *cha_pmus,
+                              int *out_skipped)
+{
+    int active = 0, skipped = 0;
+    for (int i = 0; i < n_discovered; i++) {
+        int cha_id = discovered[i].cha_id;
+        int pmu_type = discovered[i].pmu_type;
+        int cha_offset = pmu_type - base_pmu_type;
+
+        if (cha_offset < 0 || cha_offset >= g_pmu_platform.nr_cha_mapping) {
+            log_debug("detect_cha_pmus",
+                      "CHA %d: offset %d out of range (only %d mapped), skipping", cha_id,
+                      cha_offset, g_pmu_platform.nr_cha_mapping);
+            skipped++;
+            continue;
+        }
+        int core_id = g_pmu_platform.cha_to_core_map[cha_offset];
+        if (core_id >= 0 && cpu_mask != 0 && !(cpu_mask & (1ULL << core_id))) {
+            log_debug("detect_cha_pmus", "Skipping CHA %d (core %d not in target CPU mask 0x%lx)",
+                      cha_id, core_id, cpu_mask);
+            skipped++;
+            continue;
+        }
+
+        cha_pmus[active].cha_id = cha_id;
+        cha_pmus[active].pmu_type = pmu_type;
+        cha_pmus[active].core_id = core_id;
+        strncpy(cha_pmus[active].device_name, discovered[i].device_name,
+                sizeof(cha_pmus[active].device_name) - 1);
+        cha_pmus[active].device_name[sizeof(cha_pmus[active].device_name) - 1] = '\0';
+        log_info("detect_cha_pmus", "Added CHA %d: %s (PMU type %d, core %d) at index %d", cha_id,
+                 discovered[i].device_name, pmu_type, core_id, active);
+        active++;
+    }
+    *out_skipped = skipped;
+    return active;
+}
+
+int discover_cha_pmus(cha_pmu_info_t *cha_pmus, int *nr_cha, uint64_t cpu_mask)
+{
+    cha_pmus_clear_slots(cha_pmus);
+
+    cha_discovery_t discovered[MAX_CHAS];
+    int n_discovered = discover_all_cha_devices(discovered);
+    if (n_discovered < 0) {
+        return -1;
+    }
+    if (n_discovered == 0) {
+        log_info("detect_cha_pmus", "No CHA PMUs discovered");
+        *nr_cha = 0;
+        return 0;
+    }
+    log_info("detect_cha_pmus", "Total CHA PMUs discovered: %d", n_discovered);
+
+    int base = find_base_pmu_type(discovered, n_discovered);
+    int skipped = 0;
+    int active = filter_active_chas(discovered, n_discovered, base, cpu_mask, cha_pmus, &skipped);
+    *nr_cha = active;
+    if (skipped > 0) {
+        log_info("detect_cha_pmus", "Active CHA PMUs: %d (skipped %d CHAs not in target CPU mask)",
+                 active, skipped);
+    } else {
+        log_info("detect_cha_pmus", "Active CHA PMUs: %d", active);
+    }
+    return active;
+}
+
+int setup_tor_events(event_group_t *event_group, int pmu_type, int tier, int core_id)
+{
+    const pmu_platform_t *plat = &g_pmu_platform;
+    static const char *event_names[CHA_EVENT_COUNT] = {"TOR_OCCUPANCY", "TOR_CYCLES"};
+    int leader_fd = -1;
+
+    for (int i = 0; i < CHA_EVENT_COUNT; i++) {
+        struct perf_event_attr pe;
+        memset(&pe, 0, sizeof(pe));
+        pe.size = sizeof(pe);
+        pe.type = pmu_type;
+        pe.sample_type = PERF_SAMPLE_IDENTIFIER;
+        pe.read_format = PERF_FORMAT_TOTAL_TIME_ENABLED | PERF_FORMAT_TOTAL_TIME_RUNNING |
+                         PERF_FORMAT_GROUP | PERF_FORMAT_ID;
+
+        /* All config composition delegated to the platform */
+        tor_pe_config_t cfg;
+        plat->fill_tor_config(plat, &cfg, i, tier, core_id);
+        pe.config = cfg.config;
+        pe.config1 = cfg.config1;
+        pe.config2 = cfg.config2;
+
+        pe.disabled = (i == CHA_TOR_OCCUPANCY) ? 1 : 0;
+        pe.exclude_kernel = 0;
+        pe.exclude_hv = 0;
+        pe.exclude_idle = 0;
+        pe.inherit = 1;
+
+        int group_fd = (i == CHA_TOR_OCCUPANCY) ? -1 : leader_fd;
+        int fd = perf_event_open(&pe, -1, 0, group_fd, 0);
+
+        if (fd == -1) {
+            log_warning("setup_tor_events", "Error opening %s event (tier %d): %s", event_names[i],
+                        tier, strerror(errno));
+            return -1;
+        }
+
+        ioctl(fd, PERF_EVENT_IOC_ID, &event_group->ids[i]);
+        event_group->fds[i] = fd;
+        event_group->counters_used++;
+
+        if (i == CHA_TOR_OCCUPANCY) {
+            leader_fd = fd;
+        }
+    }
+
+    return 0;
+}
+
+/* Setup perf events for active CHAs (already filtered by discover_cha_pmus) */
+static void close_event_group_fds(event_group_t *g)
+{
+    for (int j = 0; j < g->counters_used; j++) {
+        if (g->fds[j] != -1) {
+            close(g->fds[j]);
+            g->fds[j] = -1;
+        }
+    }
+}
+
+/* Cleanup partially-opened TOR event fds for one CHA after setup failure.
+ * Fixes a prior bug where both loops indexed group_slow.fds, leaking the
+ * group_fast fds when slow-group setup failed after fast-group success. */
+static void cleanup_partial_cha_setup(cha_pmu_info_t *cha)
+{
+    close_event_group_fds(&cha->group_fast);
+    close_event_group_fds(&cha->group_slow);
+}
+
+/* Open the fast (tier 0) and slow (tier 1) TOR event groups for one CHA.
+ * On any group failure, both groups' fds are closed via cleanup helper.
+ * Returns the number of events successfully opened (0 on failure). */
+static int setup_one_cha_tor_groups(cha_pmu_info_t *cha)
+{
+    int fast_ok = setup_tor_events(&cha->group_fast, cha->pmu_type, 0, cha->core_id) == 0;
+    int slow_ok =
+        fast_ok && setup_tor_events(&cha->group_slow, cha->pmu_type, 1, cha->core_id) == 0;
+    if (slow_ok) {
+        return cha->group_fast.counters_used + cha->group_slow.counters_used;
+    }
+    fprintf(stderr, "  Failed to setup TOR events for CHA %d, skipping\n", cha->cha_id);
+    cleanup_partial_cha_setup(cha);
+    return 0;
+}
+
+int setup_pmu_cha_perf_events(cha_pmu_info_t *cha_pmus, int *nr_cha)
+{
+    int total_events = 0;
+    int active_cha_count = 0;
+
+    for (int i = 0; i < *nr_cha; i++) {
+        log_info("setup_uncore_events", "Setting up CHA %d (%s, PMU type %d, core %d)",
+                 cha_pmus[i].cha_id, cha_pmus[i].device_name, cha_pmus[i].pmu_type,
+                 cha_pmus[i].core_id);
+        int n = setup_one_cha_tor_groups(&cha_pmus[i]);
+        if (n > 0) {
+            active_cha_count++;
+            total_events += n;
+        }
+    }
+    log_info("setup_uncore_events", "Successfully opened %d individual events across %d CHAs",
+             total_events, active_cha_count);
+    return total_events;
+}
+
+/* manipulate CHA PMU counters */
+void ioctl_pmu_cha_perf_events(cha_pmu_info_t *cha_pmus, int nr_cha, int request)
+{
+    for (int i = 0; i < nr_cha; i++) {
+        ioctl(cha_pmus[i].group_fast.fds[0], request, PERF_IOC_FLAG_GROUP);
+        ioctl(cha_pmus[i].group_slow.fds[0], request, PERF_IOC_FLAG_GROUP);
+    }
+}
+
+/* manipulate per-cpu PMU counters, includes fast/slow tier pebs, and counting events if no pid is specified */
+void ioctl_pmu_core_perf_events(per_cpu_state_t *cpu_states, int nr_target_cpus, int request)
+{
+    for (int i = 0; i < nr_target_cpus; i++) {
+        ioctl(cpu_states[i].leader.fd, request, PERF_IOC_FLAG_GROUP);
+    }
+}
+
+void start_pmu_perf_events(pact_context_t *ctx)
+{
+    pact_workload_t *wl = ctx->workload;
+    ioctl_pmu_core_perf_events(ctx->cpu_states, ctx->nr_all_cpus, PERF_EVENT_IOC_RESET);
+    ioctl_pmu_cha_perf_events(wl->cha_pmus, wl->nr_cha, PERF_EVENT_IOC_RESET);
+    if (wl->counting_leader.fd >= 0) {
+        ioctl(wl->counting_leader.fd, PERF_EVENT_IOC_RESET, PERF_IOC_FLAG_GROUP);
+    }
+    ioctl_pmu_cha_perf_events(wl->cha_pmus, wl->nr_cha, PERF_EVENT_IOC_ENABLE);
+    if (wl->counting_leader.fd >= 0) {
+        ioctl(wl->counting_leader.fd, PERF_EVENT_IOC_ENABLE, PERF_IOC_FLAG_GROUP);
+    }
+    ioctl_pmu_core_perf_events(ctx->cpu_states, ctx->nr_all_cpus, PERF_EVENT_IOC_ENABLE);
+}
+
+void stop_pmu_perf_events(pact_context_t *ctx)
+{
+    pact_workload_t *wl = ctx->workload;
+    ioctl_pmu_cha_perf_events(wl->cha_pmus, wl->nr_cha, PERF_EVENT_IOC_DISABLE);
+    if (wl->counting_leader.fd >= 0) {
+        ioctl(wl->counting_leader.fd, PERF_EVENT_IOC_DISABLE, PERF_IOC_FLAG_GROUP);
+    }
+    ioctl_pmu_core_perf_events(ctx->cpu_states, ctx->nr_all_cpus, PERF_EVENT_IOC_DISABLE);
+}
+
+void read_pmu_cha_perf_events(cha_pmu_info_t *cha_pmus, int nr_cha)
+{
+    for (int i = 0; i < nr_cha; i++) {
+        read_pmu_event_group(&cha_pmus[i].group_fast);
+        read_pmu_event_group(&cha_pmus[i].group_slow);
+        /* scale readings with time_enabled / time_running */
+        scale_multiplexed_events(&cha_pmus[i].group_fast);
+        scale_multiplexed_events(&cha_pmus[i].group_slow);
+    }
+}
+
+/* Read a perf event group via leader_fd. Matches the N values returned by
+ * the kernel to the caller's expected event IDs and writes them into
+ * values[]; unmatched slots are left zeroed. Returns bytes read (>0 on
+ * success, 0 on empty, <0 on error). */
+static int read_perf_event_group_raw(int leader_fd, const uint64_t *ids, uint64_t *values, int n,
+                                     uint64_t *out_time_enabled, uint64_t *out_time_running)
+{
+    char buf[4096];
+    read_format_t *rf = (read_format_t *)buf;
+    int bytes_read = read(leader_fd, buf, sizeof(buf));
+    if (bytes_read <= 0) {
+        return bytes_read;
+    }
+    for (int j = 0; j < n; j++) {
+        values[j] = 0;
+    }
+    for (uint64_t i = 0; i < rf->nr; i++) {
+        for (int j = 0; j < n; j++) {
+            if (rf->values[i].id == ids[j]) {
+                values[j] = rf->values[i].value;
+                break;
+            }
+        }
+    }
+    if (out_time_enabled) {
+        *out_time_enabled = rf->time_enabled;
+    }
+    if (out_time_running) {
+        *out_time_running = rf->time_running;
+    }
+    return bytes_read;
+}
+
+/* Read a perf_event_t[N] group (per_cpu_state_t / pact_workload_t shape):
+ * gather ids, call the raw helper, scatter values back. */
+static int read_perf_event_array(perf_event_t *leader, perf_event_t *events, int n)
+{
+    if (leader->fd < 0) {
+        return -1;
+    }
+    uint64_t ids[CORE_EVENT_COUNT];
+    uint64_t values[CORE_EVENT_COUNT];
+    for (int j = 0; j < n; j++) {
+        ids[j] = events[j].id;
+    }
+    int bytes_read = read_perf_event_group_raw(leader->fd, ids, values, n, &leader->time_enabled,
+                                               &leader->time_running);
+    if (bytes_read <= 0) {
+        return bytes_read;
+    }
+    for (int j = 0; j < n; j++) {
+        events[j].value = (events[j].fd >= 0) ? values[j] : 0;
+    }
+    return bytes_read;
+}
+
+/* Read events in counting mode, per-tier LLC misses. */
+void read_cpu_counting_events(per_cpu_state_t *cpu_state)
+{
+    int bytes_read = read_perf_event_array(&cpu_state->leader, cpu_state->events, CORE_EVENT_COUNT);
+    if (bytes_read <= 0 && cpu_state->leader.fd >= 0) {
+        log_warning("read_cpu_counting_events", "Failed to read CPU %d: bytes_read=%d, errno=%s",
+                    cpu_state->cpu_id, bytes_read, strerror(errno));
+    }
+}
+
+/* Read the workload's per-PID counting group (single fd, all events in
+ * one read). Counts are kernel-aggregated across all threads of the
+ * workload via inherit=1. */
+static void read_workload_counting_events(pact_workload_t *wl)
+{
+    int bytes_read =
+        read_perf_event_array(&wl->counting_leader, wl->counting_events, CORE_EVENT_COUNT);
+    if (bytes_read <= 0 && wl->counting_leader.fd >= 0) {
+        log_warning("read_workload_counting_events",
+                    "Failed to read workload PID %d: bytes_read=%d, errno=%s", wl->target_pid,
+                    bytes_read, strerror(errno));
+    }
+}
+
+/* Function to read and display results from all CHAs (individual events with proper summation) */
+void read_and_display_results(cha_pmu_info_t *cha_pmus, int nr_cha)
+{
+    long long count_tor_cycle, count_tor_occupancy;
+    long long total_tor_cycle = 0, total_tor_occupancy = 0;
+    int successful_chas = 0;
+    int total_active_chas = 0;
+
+    printf("\n=== Results (1 second monitoring across all CHAs - individual events summed) ===\n");
+    printf("%-8s %-15s %-15s %-15s %-15s\n", "CHA", "Config2=0x1", "Config2=0x0", "Difference",
+           "Device");
+    printf("%-8s %-15s %-15s %-15s %-15s\n", "---", "-----------", "-----------", "----------",
+           "------");
+
+    for (int i = 0; i < nr_cha; i++) {
+        total_active_chas++;
+        count_tor_cycle = 0;
+        count_tor_occupancy = 0;
+
+        read_pmu_event_group(&cha_pmus[i].group_fast);
+        read_pmu_event_group(&cha_pmus[i].group_slow);
+
+        count_tor_occupancy = cha_pmus[i].group_slow.values[0];
+        count_tor_cycle = cha_pmus[i].group_slow.values[1];
+
+        /* Display results for this CHA */
+        printf("%-8d ", cha_pmus[i].cha_id);
+
+        if (count_tor_cycle >= 0) {
+            printf("%-15lld ", count_tor_cycle);
+            total_tor_cycle += count_tor_cycle;
+        } else {
+            printf("%-15s ", "N/A");
+        }
+
+        if (count_tor_occupancy >= 0) {
+            printf("%-15lld ", count_tor_occupancy);
+            total_tor_occupancy += count_tor_occupancy;
+        } else {
+            printf("%-15s ", "N/A");
+        }
+
+        if (count_tor_cycle >= 0 && count_tor_occupancy >= 0) {
+            printf("%-15lld ", count_tor_cycle - count_tor_occupancy);
+            successful_chas++;
+        } else {
+            printf("%-15s ", "N/A");
+        }
+
+        printf("%-15s\n", cha_pmus[i].device_name);
+    }
+
+    printf("%-8s %-15s %-15s %-15s %-15s\n", "---", "-----------", "-----------", "----------",
+           "------");
+    printf("%-8s %-15lld %-15lld %-15lld %-15s\n", "SUM", total_tor_cycle, total_tor_occupancy,
+           total_tor_cycle - total_tor_occupancy, successful_chas == 1 ? "CHA0 only" : "All CHAs");
+
+    printf("\nSummary:\n");
+    printf("- Successfully monitored %d out of %d CHAs\n", successful_chas, total_active_chas);
+    if (successful_chas == 1) {
+        printf("- Only CHA0 supports this specific event configuration\n");
+        printf("- This matches your original working perf command (uncore_cha_0 only)\n");
+        printf("- CHA0 may provide socket-level aggregated counts for this event type\n");
+    } else if (successful_chas > 1) {
+        printf("- Multiple CHAs support this event - sum provides socket-level view\n");
+    } else {
+        printf("- No CHAs successfully opened - check event configuration\n");
+    }
+}
+
+/* Function to cleanup all events */
+void cleanup_pmu_cha_perf_events(cha_pmu_info_t *cha_pmus, int nr_cha)
+{
+    for (int i = 0; i < nr_cha; i++) {
+        for (int j = 0; j < cha_pmus[i].group_fast.counters_used; j++) {
+            if (cha_pmus[i].group_fast.fds[j] != -1) {
+                ioctl(cha_pmus[i].group_fast.fds[j], PERF_EVENT_IOC_DISABLE, 0);
+                close(cha_pmus[i].group_fast.fds[j]);
+            }
+        }
+        for (int j = 0; j < cha_pmus[i].group_slow.counters_used; j++) {
+            if (cha_pmus[i].group_slow.fds[j] != -1) {
+                ioctl(cha_pmus[i].group_slow.fds[j], PERF_EVENT_IOC_DISABLE, 0);
+                close(cha_pmus[i].group_slow.fds[j]);
+            }
+        }
+    }
+}
+
+int setup_dummy_leader_event(perf_event_t *perf_event, pid_t pid, int cpu)
+{
+    struct perf_event_attr pe;
+    memset(&pe, 0, sizeof(pe));
+
+    pe.type = PERF_TYPE_SOFTWARE;
+    pe.config = PERF_COUNT_SW_DUMMY;
+    pe.size = sizeof(pe);
+    pe.disabled = 1; /* ONLY group leader start disabled*/
+    pe.inherit = 1;
+    pe.read_format = PERF_FORMAT_TOTAL_TIME_ENABLED | PERF_FORMAT_TOTAL_TIME_RUNNING |
+                     PERF_FORMAT_GROUP | PERF_FORMAT_ID;
+
+    perf_event->fd = perf_event_open(&pe, pid, cpu, -1, 0);
+    if (perf_event->fd == -1) {
+        log_error("setup_dummy_leader_event", "perf_event_open(pid=%d, cpu=%d) failed: %s", pid,
+                  cpu, strerror(errno));
+        return -1;
+    }
+
+    return 0;
+}
+
+/* Setup PEBS for LLC miss sampling, for the target CPUs */
+int setup_pebs_event(per_cpu_state_t *cpu_state, pid_t pid, int cpu)
+{
+    struct perf_event_attr pe;
+    memset(&pe, 0, sizeof(pe));
+
+    pe.type = PERF_TYPE_RAW;
+    pe.size = sizeof(pe);
+    pe.sample_period = cpu_state->pebs_sampling_period;
+    pe.sample_type = PERF_SAMPLE_ADDR | PERF_SAMPLE_TID;
+    pe.exclude_kernel = 1;
+    pe.exclude_hv = 1;
+    pe.exclude_idle = 1;
+    pe.mmap = 1;
+    pe.precise_ip = 2; /* Request PEBS */
+    pe.inherit = 1;
+    pe.read_format = PERF_FORMAT_TOTAL_TIME_ENABLED | PERF_FORMAT_TOTAL_TIME_RUNNING |
+                     PERF_FORMAT_GROUP | PERF_FORMAT_ID;
+
+    /* MEM_LOAD_L3_MISS_RETIRED.REMOTE_DRAM — slow tier only */
+    pe.config = g_pmu_platform.event_llc_miss_remote;
+
+    cpu_state->fd_pebs = perf_event_open(&pe, pid, cpu, cpu_state->leader.fd, 0);
+    if (cpu_state->fd_pebs < 0) {
+        if (errno == EACCES) {
+            log_error("setup_pebs_sampling",
+                      "Permission denied for PEBS - run as root or adjust perf_event_paranoid");
+        } else if (errno == ENODEV) {
+            log_error("setup_pebs_sampling", "PEBS not supported on this hardware");
+        } else {
+            log_error("setup_pebs_sampling", "Failed to open PEBS event");
+        }
+        return -1;
+    }
+    log_info("setup_pebs_sampling", "CPU [%d] PEBS event fd:%d (REMOTE_DRAM)", cpu,
+             cpu_state->fd_pebs);
+
+    /* Map the buffer */
+    size_t mmap_size = (1 + PERF_BUFFER_PAGES) * PAGE_SIZE;
+    cpu_state->pebs_mmap =
+        mmap(NULL, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, cpu_state->fd_pebs, 0);
+    if (cpu_state->pebs_mmap == MAP_FAILED) {
+        log_error("setup_pebs_sampling", "Failed to mmap PEBS buffer");
+        safe_close(cpu_state->fd_pebs, "setup_pebs_sampling");
+        cpu_state->fd_pebs = -1;
+        return -1;
+    }
+
+    return 0;
+}
+
+int setup_counting_event(perf_event_t *perf_event, pid_t pid, int cpu, perf_event_t *leader,
+                         uint64_t config, const char *name)
+{
+    struct perf_event_attr pe;
+
+    memset(&pe, 0, sizeof(pe));
+    pe.type = PERF_TYPE_RAW;
+    pe.size = sizeof(pe);
+    pe.config = config;                      /* event config */
+    pe.sample_type = PERF_SAMPLE_IDENTIFIER; /* key for counting mode */
+    pe.sample_period = 0;
+    pe.exclude_kernel = 1;
+    pe.exclude_hv = 1;
+    pe.inherit = 1;
+    pe.read_format = PERF_FORMAT_TOTAL_TIME_ENABLED | PERF_FORMAT_TOTAL_TIME_RUNNING |
+                     PERF_FORMAT_GROUP | PERF_FORMAT_ID;
+
+    /* CRITICAL: Leader must start disabled, members inherit this */
+    if (leader == NULL) {
+        pe.disabled = 1; /* This is the leader - start disabled */
+    } else {
+        pe.disabled = 0; /* Group member - will follow leader's state */
+    }
+
+    perf_event->fd = perf_event_open(&pe, pid, cpu, (leader == NULL ? -1 : leader->fd), 0x8);
+    if (perf_event->fd < 0) {
+        log_error("setup_counting_event", "Failed to open counting event config=0x%llx", config);
+        perf_event->fd = -1;
+        exit(EXIT_FAILURE);
+    } else {
+        log_info("setup_counting_event", "thread [%d] counting event %s (config=0x%llx) fd:%d", pid,
+                 name, config, perf_event->fd);
+    }
+    ioctl(perf_event->fd, PERF_EVENT_IOC_ID, &perf_event->id);
+
+    return 0;
+}
+
+uint64_t read_pmu_counter(int fd)
+{
+    if (fd < 0) {
+        return 0; /* Counter not available */
+    }
+
+    uint64_t value;
+    ssize_t bytes_read = read(fd, &value, sizeof(value));
+    if (bytes_read != sizeof(value)) {
+        if (bytes_read < 0) {
+            log_info("read_counter", "bytes_read=%ld", bytes_read);
+            perror("read fd");
+            log_warning("read_counter", "Failed to read performance counter");
+        }
+        return 0;
+    }
+    /*printf("%s,%d,hell bytes_read=%ld,value=%lld\n", __func__, __LINE__, bytes_read, value); */
+    return value;
+}
+
+/* Read an event group */
+int read_pmu_event_group(event_group_t *event_group)
+{
+    if (event_group->fds[0] < 0) {
+        return -1; /* Group not available */
+    }
+    uint64_t te = event_group->time_enabled, tr = event_group->time_running;
+    int bytes_read =
+        read_perf_event_group_raw(event_group->fds[0], event_group->ids, event_group->values,
+                                  event_group->counters_used, &te, &tr);
+    if (bytes_read > 0) {
+        event_group->last_time_enabled = event_group->time_enabled;
+        event_group->last_time_running = event_group->time_running;
+        event_group->time_enabled = te;
+        event_group->time_running = tr;
+    }
+    return 0;
+}
+
+void scale_multiplexed_events(event_group_t *event_group)
+{
+    double scale_factor = 1.0;
+    if (event_group->time_running - event_group->last_time_running == 0) {
+        return; /* No change in time_running, no scaling needed */
+    }
+    scale_factor = (double)(event_group->time_enabled - event_group->last_time_enabled) /
+                   (double)(event_group->time_running - event_group->last_time_running);
+    for (int i = 0; i < event_group->counters_used; i++) {
+        event_group->values[i] = (uint64_t)((double)event_group->values[i] * scale_factor);
+    }
+}
+
+/* Lookup PMU type by name */
+int lookup_pmu_type_by_name(const char *name)
+{
+    char path[256];
+    FILE *fp;
+    int pmu_type;
+
+    snprintf(path, sizeof(path), "/sys/devices/%s/type", name);
+    fp = fopen(path, "r");
+    if (!fp) {
+        return -1; /* PMU not found */
+    }
+
+    if (fscanf(fp, "%d", &pmu_type) != 1) {
+        fclose(fp);
+        return -1;
+    }
+
+    fclose(fp);
+    return pmu_type;
+}
+
+/* Calculate per-core per-tier MLP using CHA PMU events */
+void calculate_per_core_per_tier_mlp(pact_workload_t *wl, int tier, int nr_cpus)
+{
+    cha_pmu_info_t *cha_pmus = wl->cha_pmus;
+    double *mlp_array = (tier == 0) ? wl->per_core_mlp_fast : wl->per_core_mlp_slow;
+
+    if (!mlp_array) {
+        log_warning("calculate_per_core_mlp", "Per-core MLP array not allocated for tier %d", tier);
+        return;
+    }
+
+    /* Calculate MLP for each core using its associated CHA */
+    for (int cha = 0; cha < wl->nr_cha; cha++) {
+        int core = cha_pmus[cha].core_id;
+        if (core < 0 || core >= nr_cpus) {
+            continue;
+        }
+
+        event_group_t *group = (tier == 0) ? &cha_pmus[cha].group_fast : &cha_pmus[cha].group_slow;
+
+        uint64_t occupancy = group->values[CHA_TOR_OCCUPANCY];
+        uint64_t cycles = group->values[CHA_TOR_CYCLES];
+        uint64_t time_running = group->time_running;
+
+        /* Handle low load scenarios - if time_running is low, data is unreliable */
+        /* time_running is in ns, 1ms interval */
+        if (time_running < 1000000) {
+            /* Too few cycles to be meaningful, keep previous value or default */
+            if (mlp_array[core] == 0.0) {
+                mlp_array[core] = 1.0;
+            }
+            continue;
+        }
+
+        /* Validate counter readings */
+        if (cycles == 0 || occupancy == 0) {
+            mlp_array[core] = 1.0; /* No memory traffic, use minimum MLP */
+            continue;
+        }
+
+        double mlp_raw = (double)occupancy / (double)cycles;
+        log_trace("calculate_per_core_mlp",
+                  "Core %d Tier %d: time_running=%llu, occupancy=%llu, cycles=%llu, raw MLP=%.2f",
+                  core, tier, time_running, occupancy, cycles, mlp_raw);
+
+        /* Apply EWMA per-core */
+        const double alpha = EWMA_ALPHA_MLP;
+        if (mlp_array[core] == 0.0) {
+            mlp_array[core] = mlp_raw; /* First measurement */
+        } else {
+            mlp_array[core] = alpha * mlp_raw + (1.0 - alpha) * mlp_array[core];
+        }
+
+        /* Clamp to valid range */
+        if (mlp_array[core] < g_pmu_platform.mlp_min) {
+            mlp_array[core] = g_pmu_platform.mlp_min;
+        }
+        if (mlp_array[core] > g_pmu_platform.mlp_max) {
+            mlp_array[core] = g_pmu_platform.mlp_max;
+        }
+    }
+}
+
+/* Calculate workload-averaged MLP across target cores only */
+void calculate_workload_average_mlp(pact_workload_t *wl, int nr_cpus)
+{
+    double sum_fast = 0.0;
+    double sum_slow = 0.0;
+    int count = 0;
+
+    if (!wl->per_core_mlp_fast || !wl->per_core_mlp_slow) {
+        log_warning("calculate_workload_mlp", "Per-core MLP arrays not allocated");
+        return;
+    }
+
+    /* Average over workload's target cores */
+    for (int i = 0; i < wl->nr_target_cpus; i++) {
+        int core = wl->target_cpus[i];
+        if (core >= 0 && core < nr_cpus && wl->per_core_mlp_fast[core] > 0.0) {
+            sum_fast += wl->per_core_mlp_fast[core];
+            sum_slow += wl->per_core_mlp_slow[core];
+            count++;
+        }
+    }
+
+    if (count > 0) {
+        wl->workload_mlp_fast = sum_fast / count;
+        wl->workload_mlp_slow = sum_slow / count;
+    } else {
+        /* No valid cores, use defaults */
+        wl->workload_mlp_fast = 1.0;
+        wl->workload_mlp_slow = 1.0;
+    }
+
+    /* Debug logging */
+    static int debug_counter = 0;
+    if (++debug_counter % 50 == 1) {
+        log_debug("calculate_workload_mlp",
+                  "Workload PID %d MLP: fast=%.2f, slow=%.2f (averaged over %d cores)",
+                  wl->target_pid, wl->workload_mlp_fast, wl->workload_mlp_slow, count);
+    }
+}
+
+/* Read the per-PID counting group (single fd with inherit=1, aggregating
+ * across all child threads of the workload) and roll up into workload
+ * stats. MLP is computed from CHA TOR ratios (Algorithm 1). */
+void read_pmu_counting_events(pact_context_t *ctx)
+{
+    pact_workload_t *wl = ctx->workload;
+
+    read_workload_counting_events(wl);
+    uint64_t wl_fast = wl->counting_events[CORE_EVENT_LLC_MISS_FAST].value;
+    uint64_t wl_slow = wl->counting_events[CORE_EVENT_LLC_MISS_SLOW].value;
+    log_trace("read_pmu_counting_events", "Workload LLC misses fast=%lu, slow=%lu", wl_fast,
+              wl_slow);
+
+    wl->stats.llc_misses_fast = wl_fast;
+    wl->stats.llc_misses_slow = wl_slow;
+    if (wl->counting_leader.fd >= 0) {
+        wl->stats.time_running = wl->counting_leader.time_running - wl->stats.last_time_running;
+        wl->stats.last_time_running = wl->counting_leader.time_running;
+    }
+
+    read_pmu_cha_perf_events(wl->cha_pmus, wl->nr_cha);
+    calculate_per_core_per_tier_mlp(wl, 0, ctx->nr_cpus);
+    calculate_per_core_per_tier_mlp(wl, 1, ctx->nr_cpus);
+    calculate_workload_average_mlp(wl, ctx->nr_cpus);
+    log_debug("read_pmu_counting_events", "Workload (PID %d) MLP: fast=%.2f, slow=%.2f",
+              wl->target_pid, wl->workload_mlp_fast, wl->workload_mlp_slow);
+}
+
+/* Open one counting group per workload: dummy SW leader + LLC-miss events,
+ * all on (pid=target_pid, cpu=-1, inherit=1, mmap=0). Kernel auto-attributes
+ * counts across every thread of the workload via inherit. Replaces the
+ * per-TID setup that needed /proc/<pid>/task polling. */
+void setup_workload_counting_events(pact_workload_t *wl)
+{
+    init_perf_event(&wl->counting_leader);
+    for (int j = 0; j < CORE_EVENT_COUNT; j++) {
+        init_perf_event(&wl->counting_events[j]);
+    }
+
+    if (setup_dummy_leader_event(&wl->counting_leader, wl->target_pid, -1) < 0) {
+        log_error("setup_workload_counting_events",
+                  "Failed to create counting leader for workload PID %d", wl->target_pid);
+        return;
+    }
+    for (int j = 0; j < CORE_EVENT_COUNT; j++) {
+        if (setup_counting_event(&wl->counting_events[j], wl->target_pid, -1, &wl->counting_leader,
+                                 core_event_configs[j].config, core_event_configs[j].name) < 0) {
+            log_error("setup_workload_counting_events",
+                      "Failed to setup %s event for workload PID %d", core_event_configs[j].name,
+                      wl->target_pid);
+            return;
+        }
+    }
+    log_info("setup_workload_counting_events",
+             "Workload PID %d: per-workload counting events setup (1 fd per event, inherit=1)",
+             wl->target_pid);
+}

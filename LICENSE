@@ -1,0 +1,39 @@
+MIT License
+
+Copyright (c) 2026 MoatLab, Virginia Tech
+  Hamid Hadian, Jinshu Liu, Hanchen Xu, Hansen Idden, Huaicheng Li
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+----------------------------------------------------------------------------
+
+The MIT license above applies to the PACT runtime source code (src/, run/,
+modeling/) authored by the PACT team. Several components carry their own
+licenses; see the NOTICE file for the full list. In particular:
+
+  * Vendored third-party headers (src/khashl.h, src/minicoro.h) retain their
+    original licenses. See NOTICE for provenance and license of each.
+
+  * Linux kernel patches under baselines/ and setup/ (the kernel modules under
+    setup/kernel/ and the perf patch under setup/perf/) are derivative works of
+    the Linux kernel and are therefore governed by the GNU General Public
+    License, version 2 (GPL-2.0), the license of the kernel they patch.
+
+  * Documentation, figures, and data files are additionally available under
+    the Creative Commons Attribution 4.0 International License (CC BY 4.0).
