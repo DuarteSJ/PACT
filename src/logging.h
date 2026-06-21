@@ -86,132 +86,87 @@ void log_pebs_aggregator(pact_context_t *pact, const char *function, int workloa
  * PACT_UNUSED so the empty bodies need no per-parameter (void) casts, while
  * the signatures still type-check every call and keep arguments "used" (so
  * variables passed only to log_*() do not draw unused-variable warnings). */
-static inline void init_logging(pact_context_t *pact PACT_UNUSED,
-                                const char *filename PACT_UNUSED,
+static inline void init_logging(pact_context_t *pact PACT_UNUSED, const char *filename PACT_UNUSED,
                                 const char *format PACT_UNUSED)
-{
-}
+{}
 
-static inline void cleanup_logging(pact_context_t *pact PACT_UNUSED)
-{
-}
+static inline void cleanup_logging(pact_context_t *pact PACT_UNUSED) {}
 
-static inline void log_event(pact_context_t *pact PACT_UNUSED,
-                             const char *event_type PACT_UNUSED,
-                             const char *function PACT_UNUSED,
-                             const char *format PACT_UNUSED, ...)
-{
-}
+static inline void log_event(pact_context_t *pact PACT_UNUSED, const char *event_type PACT_UNUSED,
+                             const char *function PACT_UNUSED, const char *format PACT_UNUSED, ...)
+{}
 
 static inline void log_pebs_sample(pact_context_t *pact PACT_UNUSED,
-                                   const char *function PACT_UNUSED,
-                                   int workload_id PACT_UNUSED,
-                                   uint64_t addr PACT_UNUSED,
-                                   uint8_t tier PACT_UNUSED,
+                                   const char *function PACT_UNUSED, int workload_id PACT_UNUSED,
+                                   uint64_t addr PACT_UNUSED, uint8_t tier PACT_UNUSED,
                                    uint32_t attributed_stalls PACT_UNUSED)
-{
-}
+{}
 
 static inline void log_coro_event(pact_context_t *pact PACT_UNUSED,
                                   const char *function PACT_UNUSED,
-                                  const char *coro_name PACT_UNUSED,
-                                  const char *event PACT_UNUSED,
+                                  const char *coro_name PACT_UNUSED, const char *event PACT_UNUSED,
                                   uint64_t elapsed_cycles PACT_UNUSED)
-{
-}
+{}
 
-static inline void log_pac_calculation(pact_context_t *pact PACT_UNUSED,
-                                       const char *function PACT_UNUSED,
-                                       uint64_t page_addr PACT_UNUSED,
-                                       uint32_t frequency PACT_UNUSED,
-                                       uint64_t total_samples PACT_UNUSED,
-                                       uint64_t stalls PACT_UNUSED,
-                                       uint64_t attributed_stalls PACT_UNUSED,
-                                       uint8_t tier PACT_UNUSED,
-                                       double mlp PACT_UNUSED)
-{
-}
+static inline void
+log_pac_calculation(pact_context_t *pact PACT_UNUSED, const char *function PACT_UNUSED,
+                    uint64_t page_addr PACT_UNUSED, uint32_t frequency PACT_UNUSED,
+                    uint64_t total_samples PACT_UNUSED, uint64_t stalls PACT_UNUSED,
+                    uint64_t attributed_stalls PACT_UNUSED, uint8_t tier PACT_UNUSED,
+                    double mlp PACT_UNUSED)
+{}
 
 static inline void log_ring_buffer_op(pact_context_t *pact PACT_UNUSED,
-                                      const char *function PACT_UNUSED,
-                                      const char *op PACT_UNUSED,
-                                      const char *buffer_name PACT_UNUSED,
-                                      size_t count PACT_UNUSED,
-                                      size_t current_size PACT_UNUSED,
-                                      size_t capacity PACT_UNUSED)
-{
-}
+                                      const char *function PACT_UNUSED, const char *op PACT_UNUSED,
+                                      const char *buffer_name PACT_UNUSED, size_t count PACT_UNUSED,
+                                      size_t current_size PACT_UNUSED, size_t capacity PACT_UNUSED)
+{}
 
 static inline void log_workload_info(pact_context_t *pact PACT_UNUSED,
-                                     const char *function PACT_UNUSED,
-                                     int workload_id PACT_UNUSED,
-                                     pid_t pid PACT_UNUSED,
-                                     const char *name PACT_UNUSED,
+                                     const char *function PACT_UNUSED, int workload_id PACT_UNUSED,
+                                     pid_t pid PACT_UNUSED, const char *name PACT_UNUSED,
                                      const char *cores PACT_UNUSED)
-{
-}
+{}
 
-static inline void log_migration_stats(pact_context_t *pact PACT_UNUSED,
-                                       const char *function PACT_UNUSED,
-                                       int workload_id PACT_UNUSED,
-                                       uint64_t new_promotions PACT_UNUSED,
-                                       uint64_t new_demotions PACT_UNUSED,
-                                       uint64_t avg_promotion_pac PACT_UNUSED,
-                                       uint64_t avg_demotion_pac PACT_UNUSED,
-                                       uint64_t repromotions_pact_pact PACT_UNUSED,
-                                       uint64_t repromotions_pact_other PACT_UNUSED,
-                                       uint64_t repromotions_other_pact PACT_UNUSED,
-                                       uint64_t repromotions_other_other PACT_UNUSED,
-                                       uint64_t redemotions_pact_pact PACT_UNUSED,
-                                       uint64_t redemotions_pact_other PACT_UNUSED,
-                                       uint64_t redemotions_other_pact PACT_UNUSED,
-                                       uint64_t redemotions_other_other PACT_UNUSED)
-{
-}
+static inline void log_migration_stats(
+    pact_context_t *pact PACT_UNUSED, const char *function PACT_UNUSED, int workload_id PACT_UNUSED,
+    uint64_t new_promotions PACT_UNUSED, uint64_t new_demotions PACT_UNUSED,
+    uint64_t avg_promotion_pac PACT_UNUSED, uint64_t avg_demotion_pac PACT_UNUSED,
+    uint64_t repromotions_pact_pact PACT_UNUSED, uint64_t repromotions_pact_other PACT_UNUSED,
+    uint64_t repromotions_other_pact PACT_UNUSED, uint64_t repromotions_other_other PACT_UNUSED,
+    uint64_t redemotions_pact_pact PACT_UNUSED, uint64_t redemotions_pact_other PACT_UNUSED,
+    uint64_t redemotions_other_pact PACT_UNUSED, uint64_t redemotions_other_other PACT_UNUSED)
+{}
 
-static inline void log_pmu(pact_context_t *pact PACT_UNUSED,
-                           const char *function PACT_UNUSED,
-                           int workload_id PACT_UNUSED,
-                           double fast_tier_mlp PACT_UNUSED,
-                           double slow_tier_mlp PACT_UNUSED,
-                           uint64_t llc_misses_fast PACT_UNUSED,
+static inline void log_pmu(pact_context_t *pact PACT_UNUSED, const char *function PACT_UNUSED,
+                           int workload_id PACT_UNUSED, double fast_tier_mlp PACT_UNUSED,
+                           double slow_tier_mlp PACT_UNUSED, uint64_t llc_misses_fast PACT_UNUSED,
                            uint64_t llc_misses_slow PACT_UNUSED,
                            uint64_t fast_tier_events PACT_UNUSED,
                            uint64_t slow_tier_events PACT_UNUSED)
-{
-}
+{}
 
 static inline void log_pac_update(pact_context_t *pact PACT_UNUSED,
-                                  const char *function PACT_UNUSED,
-                                  int workload_id PACT_UNUSED,
-                                  uint64_t page_addr PACT_UNUSED,
-                                  uint64_t pac_value PACT_UNUSED,
-                                  const char *tier_str PACT_UNUSED,
-                                  int bin_index PACT_UNUSED)
-{
-}
+                                  const char *function PACT_UNUSED, int workload_id PACT_UNUSED,
+                                  uint64_t page_addr PACT_UNUSED, uint64_t pac_value PACT_UNUSED,
+                                  const char *tier_str PACT_UNUSED, int bin_index PACT_UNUSED)
+{}
 
 static inline void log_migration_event(pact_context_t *pact PACT_UNUSED,
                                        const char *function PACT_UNUSED,
                                        int workload_id PACT_UNUSED,
                                        const char *operation PACT_UNUSED,
-                                       uint64_t page_addr PACT_UNUSED,
-                                       int from_tier PACT_UNUSED,
+                                       uint64_t page_addr PACT_UNUSED, int from_tier PACT_UNUSED,
                                        int to_tier PACT_UNUSED)
-{
-}
+{}
 
-static inline void log_pebs_aggregator(pact_context_t *pact PACT_UNUSED,
-                                       const char *function PACT_UNUSED,
-                                       int workload_id PACT_UNUSED,
-                                       uint64_t theory_samples PACT_UNUSED,
-                                       uint64_t processed_samples PACT_UNUSED,
-                                       uint64_t perf_dropped_events PACT_UNUSED,
-                                       uint64_t perf_dropped_samples PACT_UNUSED,
-                                       uint64_t agg_dropped_events_agg_full PACT_UNUSED,
-                                       uint64_t agg_dropped_events_update_full PACT_UNUSED)
-{
-}
+static inline void log_pebs_aggregator(
+    pact_context_t *pact PACT_UNUSED, const char *function PACT_UNUSED, int workload_id PACT_UNUSED,
+    uint64_t theory_samples PACT_UNUSED, uint64_t processed_samples PACT_UNUSED,
+    uint64_t perf_dropped_events PACT_UNUSED, uint64_t perf_dropped_samples PACT_UNUSED,
+    uint64_t agg_dropped_events_agg_full PACT_UNUSED,
+    uint64_t agg_dropped_events_update_full PACT_UNUSED)
+{}
 
 #endif /* PACT_ENABLE_LOGGING */
 

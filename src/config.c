@@ -29,7 +29,7 @@ void pact_init_config(pact_config_t *config)
     config->pebs_period = PACT_PEBS_SAMPLE_PERIOD;
     config->bin_width = PACT_INITIAL_BIN_WIDTH;
     config->bin_count = PACT_INITIAL_BIN_COUNT;
-    config->cooling_alpha = 1.0;              /* 1.0 = no cooling (default) */
+    config->cooling_alpha = 1.0; /* 1.0 = no cooling (default) */
     config->cooling_trigger_samples = 200000;
 
     /* target_pid is required; -1 here means "not yet supplied" — CLI
