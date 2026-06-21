@@ -102,6 +102,12 @@ echo "==> Clearing distro signing keys (avoid certs build failure)..."
 ./scripts/config --disable CONFIG_MODULE_SIG
 ./scripts/config --disable CONFIG_MODULE_SIG_ALL
 
+# WORKAROUND: Linux 6.3.0 has a known page-fault bug in module_sig_check
+# when loading compressed modules without a signature via finit_module().
+echo "==> Disabling module compression to avoid 6.3.0 page fault bug..."
+./scripts/config --disable CONFIG_MODULE_COMPRESS
+./scripts/config --disable CONFIG_MODULE_COMPRESS_ZSTD
+./scripts/config --disable CONFIG_MODULE_DECOMPRESS
 
 
 # Boot-critical drivers MUST be built-in (=y), not modules (=m). On a typical
