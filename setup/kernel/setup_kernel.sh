@@ -102,6 +102,8 @@ echo "==> Clearing distro signing keys (avoid certs build failure)..."
 ./scripts/config --disable CONFIG_MODULE_SIG
 ./scripts/config --disable CONFIG_MODULE_SIG_ALL
 
+
+
 # Boot-critical drivers MUST be built-in (=y), not modules (=m). On a typical
 # stock distro/CloudLab config the root-disk and NIC drivers ship as modules;
 # a freshly built kernel can then fail to boot because those modules are not in
@@ -119,6 +121,7 @@ for opt in \
         SCSI SCSI_MOD BLK_DEV_SD \
         ATA SATA_AHCI ATA_PIIX SATA_MOBILE_LPM_POLICY \
         BLK_DEV_NVME NVME_CORE \
+        SCSI_MPT3SAS \
         EXT4_FS \
         IXGBE I40E ICE IGB E1000E MLX5_CORE; do
     ./scripts/config --enable "CONFIG_${opt}"
