@@ -7,7 +7,7 @@ This directory contains runtime configuration scripts and run scripts for baseli
 | System | Description |
 |--------|-------------|
 | **TPP** | Transparent Page Placement - ASPLOS'23 |
-| **NBT** | Linux NUMA-Balancing-Tiering (v6.3) |
+| **NBT** | Linux NUMA-Balancing-Tiering (v5.18) |
 | **Nomad** | Non-exclusive Memory Tiering - OSDI'24 |
 | **Colloid** | Access Latency is Key! - SOSP'24 |
 | **Memtis** | Hardware-counter-driven tiered memory using PEBS for per-page access profiling and frequency-based migration - SOSP'23. [memtis/](memtis/) |
