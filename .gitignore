@@ -2,11 +2,12 @@
 *.o
 *.d
 src/build-info.h
+src/.buildflags
 src/pact
 
 # Program output / results
 *.txt
-run/rst/
+run/results/
 
 # perf build tree produced by setup/perf/install-perf.sh
 setup/perf/linux-5.15-pact/
@@ -19,3 +20,12 @@ setup/perf/linux-5.15-pact/
 # Local-only working files (never part of the artifact)
 .local/
 *.local.md
+
+# out-of-tree kernel-module build products (setup/kernel + baselines)
+*.ko
+*.mod.c
+.*.cmd
+Module.symvers
+modules.order
+baselines/*/linux/
+baselines/*/log
