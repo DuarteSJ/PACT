@@ -51,17 +51,6 @@ _Static_assert(sizeof(migration_entry_t) <= 64,
 #define RESERVOIR_SIZE 100 /* reservoir sample count for adaptive binning */
 #define CORO_STACK_SIZE (64 * 1024)
 
-/* Coroutine ready bitmask helpers — called from pebs_aggregator.c. */
-void mark_coro_ready(pact_context_t *ctx, int type)
-{
-    ctx->coro_ready_mask |= (1ULL << type);
-}
-
-void clear_coro_ready(pact_context_t *ctx, int type)
-{
-    ctx->coro_ready_mask &= ~(1ULL << type);
-}
-
 void update_pac_entry(pact_context_t *pact, uint64_t page_addr, uint64_t stalls, uint8_t tier,
                       pid_t pid);
 
@@ -326,14 +315,8 @@ void update_pac_entry(pact_context_t *pact, uint64_t page_addr, uint64_t stalls,
     binning_state_t *bin;
     pac_resolve_workload_data(pact, &table, &res, &bin);
 
-#ifdef PACT_PROFILE
-    uint64_t hash_start = rdtsc();
-#endif
     khint_t k = pac_table_get(table, page_addr);
     pac_metadata_t *meta;
-#ifdef PACT_PROFILE
-    pact->workload->stats.hash_lookup_cycles += rdtsc() - hash_start;
-#endif
 
     if (k != kh_end(table)) {
         meta = kh_val(table, k);
@@ -346,9 +329,6 @@ void update_pac_entry(pact_context_t *pact, uint64_t page_addr, uint64_t stalls,
 
     apply_sample_to_meta(pact, meta, stalls, tier);
 
-#ifdef PACT_PROFILE
-    pact->workload->stats.metadata_update_cycles += rdtsc() - hash_start;
-#endif
     pact->workload->stats.pac_updates += 1;
 
     size_t bin_index = (size_t)-1;
@@ -362,9 +342,6 @@ void update_pac_entry(pact_context_t *pact, uint64_t page_addr, uint64_t stalls,
     update_sample_reservoir(res, meta);
 
     if (should_enter_promotion_pq(meta, bin, bin_index) && !meta->migrating) {
-#ifdef PACT_PROFILE
-        uint64_t queue_start = rdtsc();
-#endif
         /* Push directly into migration_ring. meta->migrating gate prevents
          * double-enqueue; migration thread clears it after numa_move_pages. */
         meta->migrating = true;
@@ -375,12 +352,8 @@ void update_pac_entry(pact_context_t *pact, uint64_t page_addr, uint64_t stalls,
         } else {
             meta->migrating = false; /* ring full — let next sample retry */
         }
-#ifdef PACT_PROFILE
-        pact->workload->stats.queue_update_cycles += rdtsc() - queue_start;
-#endif
     }
 
-    pact->workload->stats.total_operations += 1;
     /* EMA of avg PAC for optimization heuristics. */
     pact->workload->stats.avg_pac = (pact->workload->stats.avg_pac * 15 + meta->pac_value) >> 4;
 }
@@ -1053,13 +1026,6 @@ static void destroy_per_cpu_pebs(pact_context_t *pact)
         }
         safe_close(cs->fd_pebs, "pact_destroy");
         safe_close(cs->leader.fd, "pact_destroy"); /* per-CPU dummy group leader */
-        for (int j = 0; j < CORE_EVENT_COUNT; j++) {
-            safe_close(cs->events[j].fd, "pact_destroy");
-        }
-        if (cs->addr_buffer) {
-            free(cs->addr_buffer);
-            cs->addr_buffer = NULL;
-        }
     }
     free(pact->cpu_states);
 }
@@ -1308,12 +1274,9 @@ static int initialize_workloads(pact_context_t *pact, const pact_config_t *confi
 
 static void copy_policy_and_intervals(pact_context_t *pact, const pact_config_t *config)
 {
-    pact->cooling_policy = config->cooling_policy;
     pact->cooling_alpha = config->cooling_alpha;
     pact->cooling_trigger_samples = config->cooling_trigger_samples;
     pact->demotion_policy = config->demotion_policy;
-    pact->migration_policy = config->migration_policy;
-    pact->promotion_policy = config->promotion_policy;
     pact->sampling_interval_ms = config->sampling_interval_ms;
     pact->cooling_interval_ms = config->cooling_interval_ms;
     pact->adaptive_interval_ms = config->adaptive_interval_ms;

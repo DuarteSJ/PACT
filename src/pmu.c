@@ -444,16 +444,6 @@ static int read_perf_event_array(perf_event_t *leader, perf_event_t *events, int
     return bytes_read;
 }
 
-/* Read events in counting mode, per-tier LLC misses. */
-void read_cpu_counting_events(per_cpu_state_t *cpu_state)
-{
-    int bytes_read = read_perf_event_array(&cpu_state->leader, cpu_state->events, CORE_EVENT_COUNT);
-    if (bytes_read <= 0 && cpu_state->leader.fd >= 0) {
-        log_warning("read_cpu_counting_events", "Failed to read CPU %d: bytes_read=%d, errno=%s",
-                    cpu_state->cpu_id, bytes_read, strerror(errno));
-    }
-}
-
 /* Read the workload's per-PID counting group (single fd, all events in
  * one read). Counts are kernel-aggregated across all threads of the
  * workload via inherit=1. */
@@ -465,95 +455,6 @@ static void read_workload_counting_events(pact_workload_t *wl)
         log_warning("read_workload_counting_events",
                     "Failed to read workload PID %d: bytes_read=%d, errno=%s", wl->target_pid,
                     bytes_read, strerror(errno));
-    }
-}
-
-/* Function to read and display results from all CHAs (individual events with proper summation) */
-void read_and_display_results(cha_pmu_info_t *cha_pmus, int nr_cha)
-{
-    long long count_tor_cycle, count_tor_occupancy;
-    long long total_tor_cycle = 0, total_tor_occupancy = 0;
-    int successful_chas = 0;
-    int total_active_chas = 0;
-
-    printf("\n=== Results (1 second monitoring across all CHAs - individual events summed) ===\n");
-    printf("%-8s %-15s %-15s %-15s %-15s\n", "CHA", "Config2=0x1", "Config2=0x0", "Difference",
-           "Device");
-    printf("%-8s %-15s %-15s %-15s %-15s\n", "---", "-----------", "-----------", "----------",
-           "------");
-
-    for (int i = 0; i < nr_cha; i++) {
-        total_active_chas++;
-        count_tor_cycle = 0;
-        count_tor_occupancy = 0;
-
-        read_pmu_event_group(&cha_pmus[i].group_fast);
-        read_pmu_event_group(&cha_pmus[i].group_slow);
-
-        count_tor_occupancy = cha_pmus[i].group_slow.values[0];
-        count_tor_cycle = cha_pmus[i].group_slow.values[1];
-
-        /* Display results for this CHA */
-        printf("%-8d ", cha_pmus[i].cha_id);
-
-        if (count_tor_cycle >= 0) {
-            printf("%-15lld ", count_tor_cycle);
-            total_tor_cycle += count_tor_cycle;
-        } else {
-            printf("%-15s ", "N/A");
-        }
-
-        if (count_tor_occupancy >= 0) {
-            printf("%-15lld ", count_tor_occupancy);
-            total_tor_occupancy += count_tor_occupancy;
-        } else {
-            printf("%-15s ", "N/A");
-        }
-
-        if (count_tor_cycle >= 0 && count_tor_occupancy >= 0) {
-            printf("%-15lld ", count_tor_cycle - count_tor_occupancy);
-            successful_chas++;
-        } else {
-            printf("%-15s ", "N/A");
-        }
-
-        printf("%-15s\n", cha_pmus[i].device_name);
-    }
-
-    printf("%-8s %-15s %-15s %-15s %-15s\n", "---", "-----------", "-----------", "----------",
-           "------");
-    printf("%-8s %-15lld %-15lld %-15lld %-15s\n", "SUM", total_tor_cycle, total_tor_occupancy,
-           total_tor_cycle - total_tor_occupancy, successful_chas == 1 ? "CHA0 only" : "All CHAs");
-
-    printf("\nSummary:\n");
-    printf("- Successfully monitored %d out of %d CHAs\n", successful_chas, total_active_chas);
-    if (successful_chas == 1) {
-        printf("- Only CHA0 supports this specific event configuration\n");
-        printf("- This matches your original working perf command (uncore_cha_0 only)\n");
-        printf("- CHA0 may provide socket-level aggregated counts for this event type\n");
-    } else if (successful_chas > 1) {
-        printf("- Multiple CHAs support this event - sum provides socket-level view\n");
-    } else {
-        printf("- No CHAs successfully opened - check event configuration\n");
-    }
-}
-
-/* Function to cleanup all events */
-void cleanup_pmu_cha_perf_events(cha_pmu_info_t *cha_pmus, int nr_cha)
-{
-    for (int i = 0; i < nr_cha; i++) {
-        for (int j = 0; j < cha_pmus[i].group_fast.counters_used; j++) {
-            if (cha_pmus[i].group_fast.fds[j] != -1) {
-                ioctl(cha_pmus[i].group_fast.fds[j], PERF_EVENT_IOC_DISABLE, 0);
-                close(cha_pmus[i].group_fast.fds[j]);
-            }
-        }
-        for (int j = 0; j < cha_pmus[i].group_slow.counters_used; j++) {
-            if (cha_pmus[i].group_slow.fds[j] != -1) {
-                ioctl(cha_pmus[i].group_slow.fds[j], PERF_EVENT_IOC_DISABLE, 0);
-                close(cha_pmus[i].group_slow.fds[j]);
-            }
-        }
     }
 }
 
@@ -669,25 +570,6 @@ int setup_counting_event(perf_event_t *perf_event, pid_t pid, int cpu, perf_even
     return 0;
 }
 
-uint64_t read_pmu_counter(int fd)
-{
-    if (fd < 0) {
-        return 0; /* Counter not available */
-    }
-
-    uint64_t value;
-    ssize_t bytes_read = read(fd, &value, sizeof(value));
-    if (bytes_read != sizeof(value)) {
-        if (bytes_read < 0) {
-            log_info("read_counter", "bytes_read=%ld", bytes_read);
-            perror("read fd");
-            log_warning("read_counter", "Failed to read performance counter");
-        }
-        return 0;
-    }
-    /*printf("%s,%d,hell bytes_read=%ld,value=%lld\n", __func__, __LINE__, bytes_read, value); */
-    return value;
-}
 
 /* Read an event group */
 int read_pmu_event_group(event_group_t *event_group)
@@ -719,28 +601,6 @@ void scale_multiplexed_events(event_group_t *event_group)
     for (int i = 0; i < event_group->counters_used; i++) {
         event_group->values[i] = (uint64_t)((double)event_group->values[i] * scale_factor);
     }
-}
-
-/* Lookup PMU type by name */
-int lookup_pmu_type_by_name(const char *name)
-{
-    char path[256];
-    FILE *fp;
-    int pmu_type;
-
-    snprintf(path, sizeof(path), "/sys/devices/%s/type", name);
-    fp = fopen(path, "r");
-    if (!fp) {
-        return -1; /* PMU not found */
-    }
-
-    if (fscanf(fp, "%d", &pmu_type) != 1) {
-        fclose(fp);
-        return -1;
-    }
-
-    fclose(fp);
-    return pmu_type;
 }
 
 /*

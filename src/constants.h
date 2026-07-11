@@ -18,8 +18,4 @@
  * ring_buffer_uint64_pop_batch() call inside the adaptive coroutine. */
 #define PAC_DRAIN_BATCH 1024
 
-/* Fallback TSC GHz when runtime detection fails. Used only by stats.c's
- * cycles → ns conversion in print_overhead_analysis(). */
-#define PACT_TSC_GHZ_FALLBACK 2.8
-
 #endif /* PACT_CONSTANTS_H */

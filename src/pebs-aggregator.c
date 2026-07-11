@@ -443,7 +443,6 @@ void pebs_aggregator_coroutine(mco_coro *co)
 
         if (aggregated == 0) {
             /* No events available - yield */
-            clear_coro_ready(ctx, CORO_TYPE_PEBS);
             /* Debug: Print periodically */
             if (++debug_counter % 1000 == 0) {
                 log_debug("pebs_aggregator_coroutine",
@@ -463,7 +462,6 @@ void pebs_aggregator_coroutine(mco_coro *co)
 
         /* Mark PAC coroutine ready if the ring has data to drain. */
         if (ring_buffer_uint64_size(ctx->pac_update_ring) > 0) {
-            mark_coro_ready(ctx, CORO_TYPE_PAC);
         }
 
         mco_yield(co);

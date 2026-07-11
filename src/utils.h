@@ -47,13 +47,6 @@ static inline void fast_prng_init(fast_prng_t *prng)
     }
 }
 
-/* qsort comparator for uint64_t (ascending). */
-int pact_compare_uint64(const void *a, const void *b);
-
-/* Compute `percentile` (e.g., 50.0 for median) of `samples`. Sorts in-place.
- * Returns 0 if count==0; uses linear interpolation between adjacent values. */
-uint64_t pact_calculate_percentile(uint64_t *samples, size_t count, double percentile);
-
 /* Check if all workload target PIDs have exited.
  * Returns true only if at least one workload is configured AND all have died.
  * Uses kill(pid, 0) probe — treats EPERM as "still alive". */

@@ -36,15 +36,8 @@ void init_per_cpu_state(per_cpu_state_t *cpu_state)
     cpu_state->cpu_id = -1;
     cpu_state->fd_pebs = -1;
     init_perf_event(&cpu_state->leader);
-    for (int i = 0; i < CORE_EVENT_COUNT; i++) {
-        init_perf_event(&cpu_state->events[i]);
-    }
     cpu_state->pebs_sampling_period = PEBS_SAMPLE_PERIOD; /* may be overridden in pact_init */
     cpu_state->pebs_mmap = NULL;
-    cpu_state->last_head = 0;
-    cpu_state->addr_buffer = NULL;
-    cpu_state->addr_head = 0;
-    cpu_state->addr_tail = 0;
 }
 
 static void setup_one_cpu_perf(per_cpu_state_t *cs, bool skip)
@@ -55,15 +48,12 @@ static void setup_one_cpu_perf(per_cpu_state_t *cs, bool skip)
         log_warning("perf_events", "Skipping CPU %d (dummy leader failed — CPU offline?)",
                     cs->cpu_id);
         cs->fd_pebs = -1;
-        cs->addr_buffer = NULL;
         return;
     }
 
     if (skip) {
         cs->fd_pebs = -1;
-        cs->addr_buffer = NULL;
     } else {
-        cs->addr_buffer = safe_calloc(4096, sizeof(uint64_t), "CPU->addr_buffer");
         int r = setup_pebs_event(cs, -1, cs->cpu_id);
         if (r < 0) {
             log_warning("perf_events", "PEBS setup failed on CPU %d", cs->cpu_id);

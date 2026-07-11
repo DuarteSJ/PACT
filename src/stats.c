@@ -9,7 +9,6 @@
 #include "constants.h"
 #include "obj-pool.h"
 #include "pact.h"
-#include "config.h" /* PACT_TOP_K_SIZE */
 #include "stats.h"
 #include "tsc.h"
 #include "pebs-aggregator.h"
@@ -45,9 +44,6 @@ static void print_promotion_profile(pact_context_t *pact)
                       pact->workload->stats.promotion_attempts * 100.0;
         printf("Promotion Success Rate: %.1f%%\n", rate);
     }
-
-    printf("\n=== Promotion Policy ===\n");
-    printf("Policy: threshold\n");
 }
 
 static void print_hash_table_stats(pact_context_t *pact)
@@ -61,41 +57,13 @@ static void print_hash_table_stats(pact_context_t *pact)
            wl->total_pebs_samples);
 }
 
-/* Overhead analysis converts cycles → ns using the runtime-detected TSC
- * frequency (pact->tsc_freq_hz), so the numbers are correct across CPU
- * families and turbo states. */
-static void print_overhead_analysis(pact_context_t *pact)
-{
-    if (pact->workload->stats.total_operations == 0) {
-        return;
-    }
-    double tsc_ghz = (double)pact->tsc_freq_hz / 1e9;
-    if (tsc_ghz <= 0.0) {
-        tsc_ghz = PACT_TSC_GHZ_FALLBACK;
-    }
-    double hash_ns = (double)pact->workload->stats.hash_lookup_cycles /
-                     pact->workload->stats.total_operations / tsc_ghz;
-    double meta_ns = (double)pact->workload->stats.metadata_update_cycles /
-                     pact->workload->stats.total_operations / tsc_ghz;
-    double queue_ns = pact->workload->stats.queue_update_cycles > 0
-                          ? (double)pact->workload->stats.queue_update_cycles /
-                                pact->workload->stats.total_operations / tsc_ghz
-                          : 0.0;
-
-    printf("\n=== Overhead Analysis ===\n");
-    printf("Total Operations: %lu\n", pact->workload->stats.total_operations);
-    printf("Avg Hash Lookup: %.1f ns\n", hash_ns);
-    printf("Avg Metadata Update: %.1f ns\n", meta_ns);
-    printf("Avg Queue Update: %.1f ns\n", queue_ns);
-    printf("Total Avg Overhead: %.1f ns per operation\n", hash_ns + meta_ns + queue_ns);
-}
-
 static void print_mlp_and_policy(pact_context_t *pact)
 {
     pact_workload_t *wl = pact->workload;
     printf("Workload MLP (PID %d): fast %.2f, slow %.2f\n", wl->target_pid, wl->workload_mlp_fast,
            wl->workload_mlp_slow);
-    printf("Cooling Policy: None\n");
+    printf("Cooling: alpha=%.2f, trigger=%lu samples\n", pact->cooling_alpha,
+           pact->cooling_trigger_samples);
     printf("WL Bin width: %.2f, Q1: %.2f, Q3: %.2f\n", wl->binning->bin_width, wl->binning->q1,
            wl->binning->q3);
 }
@@ -149,7 +117,6 @@ void print_stats(pact_context_t *pact)
     print_pingpong_stats(pact);
     print_promotion_profile(pact);
     print_hash_table_stats(pact);
-    print_overhead_analysis(pact);
     print_mlp_and_policy(pact);
     print_pool_stats(pact);
     print_coro_sched_stats(pact);

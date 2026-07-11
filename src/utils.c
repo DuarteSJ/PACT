@@ -20,41 +20,6 @@
 #include "utils.h"
 #include "error.h"
 
-int pact_compare_uint64(const void *a, const void *b)
-{
-    uint64_t va = *(const uint64_t *)a;
-    uint64_t vb = *(const uint64_t *)b;
-    if (va < vb) {
-        return -1;
-    }
-    if (va > vb) {
-        return 1;
-    }
-    return 0;
-}
-
-uint64_t pact_calculate_percentile(uint64_t *samples, size_t count, double percentile)
-{
-    if (count == 0) {
-        return 0;
-    }
-    if (count == 1) {
-        return samples[0];
-    }
-
-    qsort(samples, count, sizeof(uint64_t), pact_compare_uint64);
-
-    double idx = (percentile / 100.0) * (count - 1);
-    size_t lower = (size_t)idx;
-    size_t upper = lower + 1;
-    if (upper >= count) {
-        upper = count - 1;
-    }
-
-    double frac = idx - lower;
-    return (uint64_t)(samples[lower] * (1 - frac) + samples[upper] * frac);
-}
-
 uint64_t pact_detect_tsc_frequency(void)
 {
     struct timespec start, end;

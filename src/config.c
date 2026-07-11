@@ -13,10 +13,7 @@
 
 void pact_init_config(pact_config_t *config)
 {
-    config->cooling_policy = COOLING_NONE;
     config->demotion_policy = DEMOTION_KERNEL_LRU;
-    config->migration_policy = MIGRATION_PAC_BASED;
-    config->promotion_policy = PROMOTION_THRESHOLD;
     config->sampling_interval_ms = PACT_DEFAULT_SAMPLING_INTERVAL_MS;
     config->cooling_interval_ms = PACT_DEFAULT_COOLING_INTERVAL_MS;
     config->adaptive_interval_ms = PACT_DEFAULT_ADAPTIVE_INTERVAL_MS;

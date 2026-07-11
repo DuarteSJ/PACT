@@ -127,17 +127,6 @@
         return true;                                                                                 \
     }                                                                                                \
                                                                                                      \
-    /* Consumer side: inspect the front element without consuming it. */                             \
-    static inline bool ring_buffer_##name##_peek(ring_buffer_##name##_t *rb, type *value)            \
-    {                                                                                                \
-        size_t tail = atomic_load_explicit(&rb->tail, memory_order_relaxed);                         \
-        if (tail == atomic_load_explicit(&rb->head, memory_order_acquire)) {                         \
-            return false; /* Buffer is Empty */                                                      \
-        }                                                                                            \
-        *value = rb->buffer[tail];                                                                   \
-        return true;                                                                                 \
-    }                                                                                                \
-                                                                                                     \
     /* Consumer side: snapshot head once (acquire), drain up to `max`, then                        \
      * publish the new tail once (release). */ \
     static inline int ring_buffer_##name##_pop_batch(ring_buffer_##name##_t *rb, type *values,       \
@@ -152,27 +141,6 @@
         }                                                                                            \
         if (count > 0) {                                                                             \
             atomic_store_explicit(&rb->tail, tail, memory_order_release);                            \
-        }                                                                                            \
-        return count;                                                                                \
-    }                                                                                                \
-                                                                                                     \
-    /* Producer side: snapshot tail once (acquire), fill up to `n`, then                           \
-     * publish the new head once (release). */ \
-    static inline int ring_buffer_##name##_push_batch(ring_buffer_##name##_t *rb, type *values,      \
-                                                      int n)                                         \
-    {                                                                                                \
-        size_t head = atomic_load_explicit(&rb->head, memory_order_relaxed);                         \
-        size_t tail = atomic_load_explicit(&rb->tail, memory_order_acquire);                         \
-        int count = 0;                                                                               \
-        while (count < n) {                                                                          \
-            size_t next_head = (head + 1) & rb->mask;                                                \
-            if (next_head == tail)                                                                   \
-                break;                                                                               \
-            rb->buffer[head] = values[count++];                                                      \
-            head = next_head;                                                                        \
-        }                                                                                            \
-        if (count > 0) {                                                                             \
-            atomic_store_explicit(&rb->head, head, memory_order_release);                            \
         }                                                                                            \
         return count;                                                                                \
     }                                                                                                \

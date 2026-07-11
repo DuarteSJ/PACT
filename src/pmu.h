@@ -86,26 +86,13 @@ typedef struct perf_event {
 /*  Per-CPU sampling state */
 typedef struct per_cpu_state {
     int cpu_id;
-    pid_t tid;
 
-    perf_event_t leader;
+    perf_event_t leader; /* dummy group leader owning the perf mmap */
     /* we don't need ids and values for pebs, no need to use perf_event_t for now */
     int fd_pebs; /*  PEBS file descriptor */
 
-    perf_event_t events[CORE_EVENT_COUNT];
-
     uint64_t pebs_sampling_period;
-    void *pebs_mmap;    /*  PEBS buffer */
-    uint64_t last_head; /*  Last processed position */
-
-    /*  Ring buffer for batching */
-    uint64_t *addr_buffer;
-    uint32_t addr_head;
-    uint32_t addr_tail;
-
-    /* User data pointer for test frameworks */
-    void *user_data; /* Optional user data pointer */
-
+    void *pebs_mmap; /*  PEBS buffer */
 } per_cpu_state_t;
 
 int validate_hardware_access(void);
@@ -127,17 +114,10 @@ void stop_pmu_perf_events(pact_context_t *ctx);
 
 int setup_pmu_cha_perf_events(cha_pmu_info_t *cha_pmus, int *nr_cha); /*  tor_occ + tor_cyc */
 int setup_tor_events(event_group_t *event_group, int pmu_type, int tier, int core_id);
-int lookup_pmu_type_by_name(const char *name);
-void cleanup_pmu_cha_perf_events(cha_pmu_info_t *cha_pmus, int max_cha_index);
 void read_pmu_cha_perf_events(cha_pmu_info_t *cha_pmus, int nr_cha);
 
-uint64_t read_pmu_counter(int fd);
 int read_pmu_event_group(event_group_t *event_group);
 void scale_multiplexed_events(event_group_t *event_group);
-
-void read_cpu_counting_events(per_cpu_state_t *cpu_state);
-
-void read_and_display_results(cha_pmu_info_t *cha_pmus, int max_cha_index);
 
 void read_pmu_counting_events(pact_context_t *ctx);
 

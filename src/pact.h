@@ -59,24 +59,11 @@ typedef struct pac_metadata {
 KHASHL_MAP_INIT(KH_LOCAL, pac_table_t, pac_table, uint64_t, pac_metadata_t *, kh_hash_uint64,
                 kh_eq_generic)
 
-/* Cooling policies. */
-typedef enum { COOLING_NONE = 0 } cooling_policy_t;
-
 /* Demotion policies. */
 typedef enum {
     DEMOTION_DISABLED = 0,   /* Disable demotion entirely */
     DEMOTION_KERNEL_LRU = 1, /* Use the kernel's LRU-based demotion (default) */
 } demotion_policy_t;
-
-/* Migration policies. */
-typedef enum {
-    MIGRATION_PAC_BASED = 0, /* Use PAC values for migration decisions */
-} migration_policy_t;
-
-/* Promotion policies. */
-typedef enum {
-    PROMOTION_THRESHOLD = 0, /* Bin-based threshold (default) */
-} promotion_policy_t;
 
 /* Coroutine types */
 typedef enum {
@@ -154,7 +141,6 @@ typedef struct {
 /* Binning state for adaptive thresholds */
 typedef struct {
     double bin_width;
-    double inv_bin_width; /* Precomputed 1.0/bin_width to avoid per-sample division */
     size_t bin_count;
     double q1, q3; /* Quartiles */
     uint64_t last_update;
@@ -181,12 +167,6 @@ typedef struct {
 
     /* Cooling statistics */
     uint64_t cooling_decays;
-
-    /* Performance counters */
-    uint64_t hash_lookup_cycles;
-    uint64_t metadata_update_cycles;
-    uint64_t queue_update_cycles;
-    uint64_t total_operations;
 
     /* PEBS sampling */
     uint64_t pebs_events_processed;
@@ -310,10 +290,7 @@ struct pact_context {
 
     /* ===== Configuration ===== */
     /* Policies */
-    cooling_policy_t cooling_policy;
     demotion_policy_t demotion_policy;
-    migration_policy_t migration_policy;
-    promotion_policy_t promotion_policy;
 
     /* Timing intervals (ms) */
     uint32_t sampling_interval_ms;
@@ -361,7 +338,6 @@ struct pact_context {
     volatile bool running;
 
     /* ===== Coroutine scheduling state ===== */
-    uint64_t coro_ready_mask; /* Bitmask of ready coroutines */
 
     /* ===== Migration Thread ===== */
     pthread_t migration_thread;             /* Migration thread handle */
@@ -380,8 +356,6 @@ extern pact_context_t *g_pact_ctx;
 #define g_pact g_pact_ctx
 
 /* Coroutine management functions */
-void mark_coro_ready(pact_context_t *ctx, int type);
-void clear_coro_ready(pact_context_t *ctx, int type);
 
 void print_stats(pact_context_t *ctx);
 

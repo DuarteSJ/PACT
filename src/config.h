@@ -17,8 +17,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#include "pact.h" /* cooling_policy_t, demotion_policy_t, migration_policy_t,
-                       promotion_policy_t */
+#include "pact.h" /* demotion_policy_t */
 
 /* Default config values exposed for validation + init. */
 #define PACT_PEBS_SAMPLE_PERIOD 400U
@@ -34,16 +33,9 @@
 #define PACT_INITIAL_BIN_WIDTH 1000.0
 #define PACT_INITIAL_BIN_COUNT 20U
 #define PACT_DEFAULT_PAC_POOL_MAX (2UL * 1024 * 1024) /* 2M entries (~256MB at 128B/entry) */
-#define PACT_DEFAULT_MIG_RETRY_DELAY_MS 100
-
-/* Priority queue capacity. */
-#define PACT_TOP_K_SIZE 1000U
 
 typedef struct pact_config {
-    cooling_policy_t cooling_policy;
     demotion_policy_t demotion_policy;
-    migration_policy_t migration_policy;
-    promotion_policy_t promotion_policy;
     uint32_t sampling_interval_ms;
     uint32_t cooling_interval_ms;
     uint32_t adaptive_interval_ms;
