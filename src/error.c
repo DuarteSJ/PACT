@@ -47,7 +47,7 @@ void set_log_level(int level)
 {
     global_log_level = level;
 
-    log_error_fn = log_error_impl; // Always log errors
+    log_error_fn = log_error_impl; /* always log errors */
     log_warning_fn = (level >= LOG_LEVEL_WARNING) ? log_warning_impl : noop_log;
     log_info_fn = (level >= LOG_LEVEL_INFO) ? log_info_impl : noop_log;
     log_debug_fn = (level >= LOG_LEVEL_DEBUG) ? log_debug_impl : noop_log;

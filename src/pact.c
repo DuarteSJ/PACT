@@ -955,17 +955,15 @@ static void init_coro_tick_clocks(pact_context_t *pact, uint64_t now)
     pact->targets_alive_next_tsc = now + sec_to_tsc(pact, 1);
 }
 
-/* PAC update ring + coroutine handle array. On ring-create failure the
- * prior hash table allocation is unwound so the caller sees clean state. */
+/* PAC update ring + coroutine handle array. Startup OOM is fatal: every
+ * sample flows through this ring, so there is nothing to degrade to. */
 static void init_pac_update_ring(pact_context_t *pact)
 {
     pact->pac_update_ring = ring_buffer_uint64_create(PAC_UPDATE_RING_SIZE);
-    if (pact->pac_update_ring) {
-        memset(pact->coroutines, 0, sizeof(pact->coroutines));
-        return;
+    if (!pact->pac_update_ring) {
+        log_error("pact_init", "Failed to initialize PAC update ring buffer");
+        exit(EXIT_FAILURE);
     }
-    pac_table_destroy(pact->workload->pac_table);
-    log_error("pact_init", "Failed to initialize PAC update ring buffer");
     memset(pact->coroutines, 0, sizeof(pact->coroutines));
 }
 

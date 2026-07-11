@@ -276,7 +276,10 @@ int pebs_aggregate_events(pebs_aggregator_t *agg, pact_context_t *ctx, double fa
                     agg->dropped_events_update_full++;
                     if (pac_count == 0) {
                         ring_blocked = true;
-                        break; /* Ring full and nothing buffered — bail to drain phase */
+                        /* Count the rest of this already-read batch as
+                         * dropped too before bailing to the drain phase. */
+                        agg->dropped_events_update_full += (uint64_t)(count - i - 1);
+                        break;
                     }
                 } else {
                     pac_count++;

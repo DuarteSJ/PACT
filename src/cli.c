@@ -39,7 +39,12 @@ int pact_parse_command_line_args(int argc, char *argv[], pact_config_t *config)
                 fprintf(stderr, "Error: --max-migrations-per-cycle requires an argument\n");
                 return -1;
             }
-            config->max_migrations_per_cycle = atoi(argv[i]);
+            int max_migrations = atoi(argv[i]);
+            if (max_migrations < 1) {
+                fprintf(stderr, "Error: --max-migrations-per-cycle must be >= 1\n");
+                return -1;
+            }
+            config->max_migrations_per_cycle = (uint32_t)max_migrations;
         } else if (strcmp(argv[i], "--demotion-margin") == 0) {
             if (++i >= argc) {
                 fprintf(stderr, "Error: --demotion-margin requires an argument\n");
@@ -51,13 +56,22 @@ int pact_parse_command_line_args(int argc, char *argv[], pact_config_t *config)
                 fprintf(stderr, "Error: --bin-count requires an argument\n");
                 return -1;
             }
-            config->bin_count = atoi(argv[i]);
+            int bin_count = atoi(argv[i]);
+            if (bin_count < 1) {
+                fprintf(stderr, "Error: --bin-count must be >= 1\n");
+                return -1;
+            }
+            config->bin_count = (uint32_t)bin_count;
         } else if (strcmp(argv[i], "--bin-width") == 0) {
             if (++i >= argc) {
                 fprintf(stderr, "Error: --bin-width requires an argument\n");
                 return -1;
             }
             config->bin_width = atof(argv[i]);
+            if (config->bin_width <= 0.0) {
+                fprintf(stderr, "Error: --bin-width must be > 0\n");
+                return -1;
+            }
         } else if (strcmp(argv[i], "--cooling-alpha") == 0) {
             if (++i >= argc) {
                 fprintf(stderr, "Error: --cooling-alpha requires an argument\n");
