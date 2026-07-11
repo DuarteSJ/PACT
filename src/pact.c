@@ -1090,8 +1090,7 @@ static void destroy_per_workload_perf(pact_context_t *pact)
         wl->counting_events[j].fd = -1;
     }
     free(wl->target_cpus);
-    free(wl->per_core_mlp_fast);
-    free(wl->per_core_mlp_slow);
+    wl->target_cpus = NULL;
 }
 
 /* Workload hash table, reservoir, binning. */
@@ -1222,16 +1221,6 @@ static int init_workload(pact_workload_t *wl, const pact_config_t *config, int m
     printf("Workload (PID %d) affinity: %d CPUs (mask=0x%lx)\n", (int)wl->target_pid, n_cpus,
            wl->cpu_mask);
 
-    wl->per_core_mlp_fast = calloc(max_cpus, sizeof(double));
-    wl->per_core_mlp_slow = calloc(max_cpus, sizeof(double));
-    if (!wl->per_core_mlp_fast || !wl->per_core_mlp_slow) {
-        fprintf(stderr, "Error: Failed to allocate MLP arrays for workload\n");
-        return -1;
-    }
-    for (int j = 0; j < max_cpus; j++) {
-        wl->per_core_mlp_fast[j] = 1.0;
-        wl->per_core_mlp_slow[j] = 1.0;
-    }
     wl->workload_mlp_fast = 1.0;
     wl->workload_mlp_slow = 1.0;
 
@@ -1258,8 +1247,6 @@ static void cleanup_workload(pact_context_t *pact)
         return;
     }
     free(pact->workload->target_cpus);
-    free(pact->workload->per_core_mlp_fast);
-    free(pact->workload->per_core_mlp_slow);
     free(pact->workload);
     pact->workload = NULL;
 }

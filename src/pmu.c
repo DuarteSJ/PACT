@@ -743,107 +743,52 @@ int lookup_pmu_type_by_name(const char *name)
     return pmu_type;
 }
 
-/* Calculate per-core per-tier MLP using CHA PMU events */
-void calculate_per_core_per_tier_mlp(pact_workload_t *wl, int tier, int nr_cpus)
+/*
+ * Per-tier MLP from CHA TOR counters (Algorithm 1): MLP = ΔT1/ΔT2, where
+ * T1 accumulates TOR occupancy and T2 counts cycles with at least one
+ * outstanding TOR entry. Occupancy and cycle deltas are summed across all
+ * of the workload's CHAs before dividing, so each tier yields one ratio
+ * per sampling window. Counters are IOC_RESET at window start, so group
+ * values are true window deltas; the multiplexing scale factor is common
+ * to both events of a group and cancels in the ratio.
+ */
+static double calculate_tier_mlp(pact_workload_t *wl, int tier)
 {
-    cha_pmu_info_t *cha_pmus = wl->cha_pmus;
-    double *mlp_array = (tier == 0) ? wl->per_core_mlp_fast : wl->per_core_mlp_slow;
+    uint64_t sum_occupancy = 0;
+    uint64_t sum_cycles = 0;
 
-    if (!mlp_array) {
-        log_warning("calculate_per_core_mlp", "Per-core MLP array not allocated for tier %d", tier);
-        return;
-    }
-
-    /* Calculate MLP for each core using its associated CHA */
     for (int cha = 0; cha < wl->nr_cha; cha++) {
-        int core = cha_pmus[cha].core_id;
-        if (core < 0 || core >= nr_cpus) {
+        event_group_t *group =
+            (tier == 0) ? &wl->cha_pmus[cha].group_fast : &wl->cha_pmus[cha].group_slow;
+
+        /* Skip groups scheduled for under 1 ms of the window; their
+         * scaled-up readings are noise. */
+        if (group->time_running < 1000000) {
             continue;
         }
-
-        event_group_t *group = (tier == 0) ? &cha_pmus[cha].group_fast : &cha_pmus[cha].group_slow;
-
-        uint64_t occupancy = group->values[CHA_TOR_OCCUPANCY];
-        uint64_t cycles = group->values[CHA_TOR_CYCLES];
-        uint64_t time_running = group->time_running;
-
-        /* Handle low load scenarios - if time_running is low, data is unreliable */
-        /* time_running is in ns, 1ms interval */
-        if (time_running < 1000000) {
-            /* Too few cycles to be meaningful, keep previous value or default */
-            if (mlp_array[core] == 0.0) {
-                mlp_array[core] = 1.0;
-            }
-            continue;
-        }
-
-        /* Validate counter readings */
-        if (cycles == 0 || occupancy == 0) {
-            mlp_array[core] = 1.0; /* No memory traffic, use minimum MLP */
-            continue;
-        }
-
-        double mlp_raw = (double)occupancy / (double)cycles;
-        log_trace("calculate_per_core_mlp",
-                  "Core %d Tier %d: time_running=%llu, occupancy=%llu, cycles=%llu, raw MLP=%.2f",
-                  core, tier, time_running, occupancy, cycles, mlp_raw);
-
-        /* Apply EWMA per-core */
-        const double alpha = EWMA_ALPHA_MLP;
-        if (mlp_array[core] == 0.0) {
-            mlp_array[core] = mlp_raw; /* First measurement */
-        } else {
-            mlp_array[core] = alpha * mlp_raw + (1.0 - alpha) * mlp_array[core];
-        }
-
-        /* Clamp to valid range */
-        if (mlp_array[core] < g_pmu_platform.mlp_min) {
-            mlp_array[core] = g_pmu_platform.mlp_min;
-        }
-        if (mlp_array[core] > g_pmu_platform.mlp_max) {
-            mlp_array[core] = g_pmu_platform.mlp_max;
-        }
+        sum_occupancy += group->values[CHA_TOR_OCCUPANCY];
+        sum_cycles += group->values[CHA_TOR_CYCLES];
     }
+
+    if (sum_occupancy == 0 || sum_cycles == 0) {
+        return g_pmu_platform.mlp_min; /* no traffic to this tier this window */
+    }
+
+    double mlp = (double)sum_occupancy / (double)sum_cycles;
+    if (mlp < g_pmu_platform.mlp_min) {
+        mlp = g_pmu_platform.mlp_min;
+    }
+    if (mlp > g_pmu_platform.mlp_max) {
+        mlp = g_pmu_platform.mlp_max;
+    }
+    return mlp;
 }
 
-/* Calculate workload-averaged MLP across target cores only */
-void calculate_workload_average_mlp(pact_workload_t *wl, int nr_cpus)
+/* Fresh per-tier MLP ratios for this window; no cross-window smoothing. */
+static void calculate_workload_mlp(pact_workload_t *wl)
 {
-    double sum_fast = 0.0;
-    double sum_slow = 0.0;
-    int count = 0;
-
-    if (!wl->per_core_mlp_fast || !wl->per_core_mlp_slow) {
-        log_warning("calculate_workload_mlp", "Per-core MLP arrays not allocated");
-        return;
-    }
-
-    /* Average over workload's target cores */
-    for (int i = 0; i < wl->nr_target_cpus; i++) {
-        int core = wl->target_cpus[i];
-        if (core >= 0 && core < nr_cpus && wl->per_core_mlp_fast[core] > 0.0) {
-            sum_fast += wl->per_core_mlp_fast[core];
-            sum_slow += wl->per_core_mlp_slow[core];
-            count++;
-        }
-    }
-
-    if (count > 0) {
-        wl->workload_mlp_fast = sum_fast / count;
-        wl->workload_mlp_slow = sum_slow / count;
-    } else {
-        /* No valid cores, use defaults */
-        wl->workload_mlp_fast = 1.0;
-        wl->workload_mlp_slow = 1.0;
-    }
-
-    /* Debug logging */
-    static int debug_counter = 0;
-    if (++debug_counter % 50 == 1) {
-        log_debug("calculate_workload_mlp",
-                  "Workload PID %d MLP: fast=%.2f, slow=%.2f (averaged over %d cores)",
-                  wl->target_pid, wl->workload_mlp_fast, wl->workload_mlp_slow, count);
-    }
+    wl->workload_mlp_fast = calculate_tier_mlp(wl, 0);
+    wl->workload_mlp_slow = calculate_tier_mlp(wl, 1);
 }
 
 /* Read the per-PID counting group (single fd with inherit=1, aggregating
@@ -867,9 +812,7 @@ void read_pmu_counting_events(pact_context_t *ctx)
     }
 
     read_pmu_cha_perf_events(wl->cha_pmus, wl->nr_cha);
-    calculate_per_core_per_tier_mlp(wl, 0, ctx->nr_cpus);
-    calculate_per_core_per_tier_mlp(wl, 1, ctx->nr_cpus);
-    calculate_workload_average_mlp(wl, ctx->nr_cpus);
+    calculate_workload_mlp(wl);
     log_debug("read_pmu_counting_events", "Workload (PID %d) MLP: fast=%.2f, slow=%.2f",
               wl->target_pid, wl->workload_mlp_fast, wl->workload_mlp_slow);
 }

@@ -11,9 +11,6 @@
 #ifndef PACT_CONSTANTS_H
 #define PACT_CONSTANTS_H
 
-/* MLP EWMA smoothing factor used in pmu.c per-core MLP averaging. */
-#define EWMA_ALPHA_MLP 0.3
-
 /* Default migration ring size. Power of 2. */
 #define MIGRATION_RING_DEFAULT_SIZE 65536U
 

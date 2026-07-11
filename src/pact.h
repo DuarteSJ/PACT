@@ -249,11 +249,10 @@ typedef struct pact_workload {
     cha_pmu_info_t cha_pmus[MAX_CHAS]; /* CHA PMU configurations */
     int nr_cha;                        /* Number of CHAs for this workload */
 
-    /* Per-workload MLP tracking */
-    double *per_core_mlp_fast; /* Per-core MLP for fast tier */
-    double *per_core_mlp_slow; /* Per-core MLP for slow tier */
-    double workload_mlp_fast;  /* Workload-averaged MLP (fast tier) */
-    double workload_mlp_slow;  /* Workload-averaged MLP (slow tier) */
+    /* Per-tier MLP for the current window (ΔT1/ΔT2 over the workload's
+     * CHAs, Algorithm 1). */
+    double workload_mlp_fast;
+    double workload_mlp_slow;
 
     /* Per-workload statistics */
     pact_stats_t stats;          /* Workload-specific statistics */
