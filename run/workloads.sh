@@ -8,7 +8,8 @@
 #   <name>_vmtouch_file  file to pre-fault into DRAM before the run (or "")
 #   <name>_omp_threads   OMP_NUM_THREADS for the run
 #   <name>_workload_cmd  the command line; "$numactl_args" is substituted by
-#                        run-pact.sh with the NUMA/cgroup pinning arguments.
+#                         run-pact.sh with CPU pinning and default first-touch
+#                         memory allocation (numactl -C <cpus> --).
 #
 # Dataset/benchmark locations come from environment variables so no
 # machine-specific path is baked in. Set these to match your machine:
@@ -23,24 +24,30 @@ SPEC_DIR="${SPEC_DIR:-/path/to/cpu2017}"
 SILO_DIR="${SILO_DIR:-/path/to/silo}"
 UBENCH_DIR="${UBENCH_DIR:-/path/to/microbenchmarks}"
 
-# <name>_rss is the workload's peak resident set size in MB. run-pact.sh uses it
-# to size the fast-tier cgroup limit (memory.max = rss * FAST_TIER_RATIO), which
-# is what creates the fast/slow split. It is GRAPH-DEPENDENT: the value below is
-# for a Kronecker graph of scale 25, degree 16 (converter -g 25 -k 16). If you
-# generate a different graph, re-measure with:
+# <name>_rss records the workload's peak resident set size in MB. It is
+# REFERENCE DATA for sizing the fast tier by hand (set memmap = _rss/2 for a
+# 1:1 split; see run/README.md) - run-pact.sh does not read it.
+#
+# GRAPH GENERATION: the paper's bc-kron uses a Kronecker graph of scale 27,
+# degree 16 (134.2M vertices, 2.11B edges, ~18 GB .sg file, ~19.5 GB RSS).
+# Generate it once with the GAPBS converter:
+#     ./converter -g27 -k16 -b benchmark/graphs/kron.sg
+# The _rss values below are for THAT graph. It is GRAPH-DEPENDENT: if you use a
+# different scale (e.g. -g25 for a smaller ~4.5 GB / ~5 GB-RSS graph), re-measure
+# with:
 #     /usr/bin/time -v ./bc -f kron.sg -i1 -n1   # "Maximum resident set size"
-# and update _rss (kbytes/1024 -> MB).
+# and update _rss (kbytes/1024 -> MB), then re-size memmap = _rss/2 for 1:1.
 
 # --- bc_kron_8t : GAP betweenness-centrality on a Kronecker graph, 8 threads
 bc_kron_8t_pname="bc"
-bc_kron_8t_rss=5070
+bc_kron_8t_rss=20000
 bc_kron_8t_vmtouch_file="${GAPBS_GRAPH_DIR}/kron.sg"
 bc_kron_8t_omp_threads=8
 bc_kron_8t_workload_cmd="\$numactl_args ${GAPBS_DIR}/bc -f ${GAPBS_GRAPH_DIR}/kron.sg -i4 -n4"
 
 # --- bc_kron_4t : same workload, 4 threads
 bc_kron_4t_pname="bc"
-bc_kron_4t_rss=5070
+bc_kron_4t_rss=20000
 bc_kron_4t_vmtouch_file="${GAPBS_GRAPH_DIR}/kron.sg"
 bc_kron_4t_omp_threads=4
 bc_kron_4t_workload_cmd="\$numactl_args ${GAPBS_DIR}/bc -f ${GAPBS_GRAPH_DIR}/kron.sg -i4 -n4"

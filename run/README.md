@@ -32,48 +32,62 @@ Example:
 ./run-pact.sh bc_kron_8t        # any workload name defined in workloads.sh
 ```
 
+An optional 2nd positional argument, `skip_setup`, skips the cold-start cache
+flush (`drop_caches`) and the `vmtouch` slow-tier preload - use it to re-run a
+workload without re-priming the machine:
+
+```bash
+./run-pact.sh bc_kron_8t skip_setup
+```
+
 What the script does:
 - Loads the PACT kernel modules from [`../setup/kernel/`](../setup/kernel/)
   (or aborts, telling you to build them).
-- Preloads the workload's data into the slow tier with `vmtouch`.
-- Caps the workload's fast-tier (DRAM) footprint with a cgroup v2 `memory.high`
-  set to `<workload>_rss * FAST_TIER_RATIO` - this is what creates the
-  fast/slow split (see below).
-- Pins the PACT runtime to CPU 1 and the workload to the other CPU cores.
+- Preloads the workload's graph file into the slow-tier page cache with
+  `vmtouch --membind 1`.
+- Launches the workload CPU-pinned (`numactl -C <cores> --`) with default
+  first-touch memory allocation - PACT is the page placer, so the workload's
+  memory is not bound to any node.
 - Launches `../src/pact` (under `sudo`; PACT needs root for PEBS/PMU) with the
-  default PEBS / migration / binning parameters.
+  default PEBS / migration / binning parameters and no core pinning (PACT's
+  `--monitor-cpu` / `--migration-cpu` default to -1).
 - Saves logs to `results/<workload>/pact/`.
 
 ### How the tiering experiment works (read this)
 
-PACT only has work to do when the workload's **hot pages start on the slow
-tier** - then PACT samples the remote-DRAM accesses (PEBS), scores their
-performance-criticality, and promotes the hot ones to the fast tier. For a run
-to exercise PACT you therefore need a genuine fast/slow split:
+PACT only has work to do when the fast tier is **too small to hold the whole
+working set**, so part of it starts on the slow tier. PACT then samples the
+slow-tier accesses (PEBS), scores their performance-criticality, promotes the
+critical pages to the fast tier, and the kernel demotes cold pages to make room.
 
-- **Fast-tier ratio.** `FAST_TIER_RATIO` (default `0.5` = a **1:1 split**) and
-  `<workload>_rss` (peak RSS in MB, in `workloads.sh`) set the cgroup
-  `memory.high = rss * ratio`. With `0.5`, half the working set fits in DRAM and
-  the rest spills to the slow tier. Override per run, e.g.
-  `FAST_TIER_RATIO=0.33 ./run-pact.sh bc_kron_8t` for a 1:2 split. (You can also
-  set an absolute `FAST_TIER_MB`.)
-- **`_rss` is the ANON working set, and is graph/input dependent.** Re-measure
-  for your graph: `/usr/bin/time -v ./bc -f kron.sg -i1 -n1` → "Maximum
-  resident set size" (kbytes/1024 = MB). If `_rss` is unset the run is
-  **uncapped** (no split, nothing to migrate) and prints a warning.
+- **The split comes from a physically small fast tier - `run-pact.sh` does NOT
+  create it.** You must shrink node 0 with a `memmap=` boot parameter BEFORE
+  running (setup step 1b; see [`../setup/README.md`](../setup/README.md)). For a
+  1:1 split, node-0 usable DRAM = workload RSS / 2. If you skip this, the whole
+  RSS fits in local DRAM, nothing lands on the slow tier, and PACT is a no-op
+  (`pebs_samples = 0`, `Promotions = 0`).
+- **First-touch placement, not a bind.** The workload launches CPU-pinned but
+  with default first-touch allocation (`numactl -C <cores> --`, no `--membind`
+  or `--preferred`) - the paper's policy for application transparency. Memory
+  fills the small fast tier first, then spills to the slow tier; PACT is the
+  page placer from there.
+- **Not a cgroup cap.** Do not emulate a small fast tier with a cgroup
+  `memory.high`/`memory.max`: a memcg limit caps total usage rather than
+  fast-tier residency, and with demotion disabled the kernel cannot shrink an
+  anonymous working set, so the workload throttles in unreclaimable D-state
+  during its allocation phase.
 - **Permissions.** `perf_event_paranoid` must be `<= 0` or PACT collects **zero
   PEBS samples** even as root. `setup/env/prepare_environment.sh` sets it to
   `-1`; if you skip env prep, do `sudo sysctl kernel.perf_event_paranoid=-1`.
 - **Checking it worked.** A healthy run shows, in `results/<wl>/pact/pact_debug.log`,
-  `pebs_samples` climbing into the millions and non-zero `Promotions
-  (successful)`, and `numastat -p <bc-pid>` shows the workload's node-0 (fast)
-  footprint growing over time. If `pebs_samples=0`, the hot set never reached
-  the slow tier (cap too loose, or run too short) or paranoid is too high.
+  `PAC Updates` and `Promotions (successful)` in the millions and non-zero
+  `Demotions`, and `numastat -p <bc-pid>` shows a non-zero node-1 (slow)
+  footprint that PACT drains over time. If `PAC Updates = 0`, nothing reached
+  the slow tier (node 0 not shrunk, or run too short) or paranoid is too high.
 
 ### Tunables (environment variables)
 
-`FAST_TIER_RATIO` / `FAST_TIER_MB` (the split, see above), `pebs_period`,
-`migration_limit`, `bin_count`, `bin_width`, `PACT`, `VMTOUCH`,
+`pebs_period`, `migration_limit`, `bin_count`, `bin_width`, `PACT`, `VMTOUCH`,
 `run_setup_config`, `enable_thp`. Example:
 
 ```bash
@@ -109,14 +123,22 @@ large). Build/obtain each from its upstream source:
   ```bash
   cd gapbs && make
   # -g <scale>: 2^scale vertices, -k <degree>: avg degree, -b: serialized .sg
-  ./converter -g 25 -k 16 -b benchmark/graphs/kron.sg
+  # Paper's bc-kron = scale 27, degree 16 (134.2M vertices, ~18 GB, ~19.5 GB RSS):
+  ./converter -g27 -k16 -b benchmark/graphs/kron.sg
   export GAPBS_DIR=$PWD
   ```
 
-  Pick `scale`/`degree` so the graph's resident size matches your fast-tier
-  budget (the paper uses a Kronecker graph sized to exceed local DRAM so it
-  spills to the slow tier). `-g 25 -k 16` is the Graph500 default starting
-  point; adjust to your node.
+  The `bc_kron_8t_rss` value in `workloads.sh` is a reference figure you use to
+  size the fast tier by hand (`memmap` = `_rss`/2 for a 1:1 split); the runner
+  does not read it. It assumes this scale-27 graph, so if you generate a
+  different scale, re-measure the RSS and update `_rss` (see the comment in
+  `workloads.sh`) and your `memmap`.
+
+  The graph must be sized to **exceed** your fast tier so it spills to the slow
+  tier (that is what gives PACT work). Scale 27 (~19.5 GB RSS) with a ~10 GB
+  fast tier is the 1:1 point used above. On a machine with more or less DRAM,
+  pick `scale` so the RSS is about twice your intended fast-tier size, then set
+  `memmap` and `_rss` to match.
 
 - **SPEC CPU 2017** (`603.bwaves_s`, `649.fotonik3d_s`) - a **licensed**
   benchmark; install it yourself and point `SPEC_DIR` at the run tree. The
@@ -169,3 +191,12 @@ topology (`numactl --hardware`; node1 should be CPU-less). Absolute slowdown
 numbers depend on the graph size, tier latency, and DRAM budget, so compare
 PACT against a baseline run on the *same* machine rather than to a fixed
 target.
+
+## Quick-start checklist
+
+- [ ] Booted into the PACT kernel (`uname -r` shows `6.3.0`) - [`../setup/kernel/`](../setup/kernel/)
+- [ ] Kernel modules built (`tierinit.ko`, `kswapdrst.ko`) - [`../setup/kernel/`](../setup/kernel/)
+- [ ] Machine prepared - [`../setup/env/`](../setup/env/)
+- [ ] `../src/pact` binary compiled - [`../src/`](../src/)
+- [ ] Workload name and data paths set (see `workloads.sh` / env vars above)
+- [ ] Run `./run-pact.sh <workload_name>`

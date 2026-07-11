@@ -46,35 +46,38 @@ done
 cpus=$(IFS=,; echo "${cores[*]}")
 
 # --- PACT Configuration (override via env, defaults match config.h) ---
-VMTOUCH="${VMTOUCH:-/usr/bin/vmtouch}"
+VMTOUCH="${VMTOUCH:-vmtouch}"
 PACT="${PACT:-../src/pact}"
 pebs_period="${pebs_period:-400}"
 migration_limit="${migration_limit:-4096}"
 bin_count="${bin_count:-20}"
 bin_width="${bin_width:-1000.0}"
 
-# --- Fast-tier size / split ratio (cgroup v2 memory.max) ---
-# A tiering experiment must CONSTRAIN the fast tier (local DRAM), otherwise the
-# whole workload fits in DRAM and there is nothing to demote/promote. We cap the
-# workload's memory with a cgroup v2 memory.max so that only a fraction of its
-# RSS fits in the fast tier and the rest spills to the slow (CXL-like) tier.
+# --- Tier placement (paper methodology: first-touch, PACT is the placer) ---
+# The workload's memory is allocated FIRST-TOUCH (default NUMA policy): we
+# CPU-pin it but do NOT bind its memory to any node. The paper's allocation
+# policy is first-touch for application transparency (PACT decides placement
+# online, the application does nothing). PACT samples slow-tier accesses and
+# promotes the performance-critical pages to the fast tier, enabling kernel
+# demotion only when Algorithm 2's balance check calls for it.
 #
-#   <workload>_rss   : the workload's peak RSS in MB (defined in workloads.sh)
-#   FAST_TIER_RATIO  : fraction of RSS allowed in the fast tier (0<r<=1).
-#                      0.5 == a 1:1 split (half fast, half slow). Default 0.5.
-#   FAST_TIER_MB     : optional absolute override (MB); takes precedence over RSS*ratio.
+# The fast/slow SPLIT comes from a physically small fast tier, NOT from
+# binding the workload's memory. Boot the machine with node 0's usable DRAM
+# reduced to the desired fast-tier size via a node-0 memmap= kernel parameter,
+# so first-touch fills the fast tier and the kernel then places the overflow
+# on the slow tier.
 #
-# When neither <workload>_rss nor FAST_TIER_MB is set, the cgroup limit is
-# skipped (with a warning) and the run is uncapped (no enforced split).
-FAST_TIER_RATIO="${FAST_TIER_RATIO:-0.5}"
-rss_var="${WORKLOAD}_rss"
-workload_rss="${!rss_var:-}"
-CGROUP_NAME="${CGROUP_NAME:-pact_${WORKLOAD}}"
+# Do NOT use a cgroup memory.high/memory.max cap to emulate a small fast
+# tier: a memcg limit caps TOTAL usage (not fast-tier residency), and with
+# demotion disabled the kernel has no way to shrink an anonymous working
+# set, so the workload throttles in unreclaimable D-state during its
+# allocation phase (reported as a hang on graph loading, issue #4).
 
 # --- Environment Setup Flag ---
 # When "true", run full machine preparation (uncore frequency pinning + CXL
-# config via check_cxl_conf) before the run, mirroring run-pact-old.sh's setup
-# phase.  Default is "false" so a plain run does NOT touch machine-wide config.
+# config via prepare_environment.sh) before the run. Default is "false" so a
+# plain run does NOT touch machine-wide config (you are expected to have run
+# setup/env/prepare_environment.sh yourself).
 # Override via env:  run_setup_config=true ./run-pact.sh <workload>
 run_setup_config="${run_setup_config:-false}"
 
@@ -83,10 +86,28 @@ run_setup_config="${run_setup_config:-false}"
 # untouched.  Override via env:  enable_thp=true ./run-pact.sh <workload>
 enable_thp="${enable_thp:-false}"
 
+# Save the pre-run THP policy so clean_up can restore it (the /sys file reports
+# the choices with the active one in [brackets], e.g. "always [madvise] never").
+# When enable_thp=true we switch it to "always" for the run and put the prior
+# policy back on exit, rather than leaving THP forced off.
+prev_thp=""
+prev_thp_defrag=""
+if [ "$enable_thp" = "true" ]; then
+    thp_line=$(cat /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null || true)
+    prev_thp=$(printf '%s\n' "$thp_line" | grep -oE '\[[a-z]+\]' | tr -d '[]' || true)
+    thp_defrag_line=$(cat /sys/kernel/mm/transparent_hugepage/defrag 2>/dev/null || true)
+    prev_thp_defrag=$(printf '%s\n' "$thp_defrag_line" | grep -oE '\[[a-z]+\]' | tr -d '[]' || true)
+fi
+
 # --- Output Directory ---
+# Fixed per-workload path. The monitor logs below (vmstat.txt, numastat.log)
+# are appended to during the run, so truncate them up front - otherwise a
+# re-run interleaves its samples with the previous run's.
 OUTDIR="./results/${WORKLOAD}/pact"
 mkdir -p "$OUTDIR"
 OUTDIR=$(realpath "$OUTDIR")
+: >"$OUTDIR/vmstat.txt"
+: >"$OUTDIR/numastat.log"
 
 echo "=== PACT Run: $WORKLOAD ==="
 echo "  CPUs: $cpus ($omp_threads threads)"
@@ -116,25 +137,25 @@ clean_up() {
         sudo kill -SIGINT "$PACT_PID" 2>/dev/null || kill -SIGINT "$PACT_PID" 2>/dev/null || true
         sleep 2
         sudo kill -KILL "$PACT_PID" 2>/dev/null || kill -KILL "$PACT_PID" 2>/dev/null || true
-        # Also reap the actual pact process (sudo's child) by name as a backstop.
-        sudo pkill -KILL -x pact 2>/dev/null || true
+        # Backstop: reap the real pact process (sudo's child) by killing PACT's
+        # process group, NOT `pkill -x pact` (which would kill every PACT on the
+        # machine, including a concurrent experiment).
+        pgid=$(ps -o pgid= -p "$PACT_PID" 2>/dev/null | tr -d ' ')
+        [ -n "$pgid" ] && sudo kill -KILL -- "-$pgid" 2>/dev/null || true
     fi
 
     kill "${pid_vmstat:-}" 2>/dev/null || true
     kill "${pid_numastat:-}" 2>/dev/null || true
 
-    # Remove the workload cgroup (must have no live procs first).
-    if [ -n "${CGROUP_PATH:-}" ] && [ -d "$CGROUP_PATH" ]; then
-        sudo rmdir "$CGROUP_PATH" 2>/dev/null || true
-    fi
-
     echo "  Disabling demotion_enabled..."
     echo 0 | sudo tee /sys/kernel/mm/numa/demotion_enabled >/dev/null 2>&1 || true
 
     if [ "$enable_thp" = "true" ]; then
-        echo "  Disabling transparent huge pages (THP policy = never)"
-        echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled >/dev/null 2>&1 || true
-        echo never | sudo tee /sys/kernel/mm/transparent_hugepage/defrag >/dev/null 2>&1 || true
+        # Restore the THP policy captured before the run (fall back to "never"
+        # only if it could not be read).
+        echo "  Restoring transparent huge pages policy (enabled=${prev_thp:-never}, defrag=${prev_thp_defrag:-never})"
+        echo "${prev_thp:-never}" | sudo tee /sys/kernel/mm/transparent_hugepage/enabled >/dev/null 2>&1 || true
+        echo "${prev_thp_defrag:-never}" | sudo tee /sys/kernel/mm/transparent_hugepage/defrag >/dev/null 2>&1 || true
     fi
 
     echo "Cleanup complete"
@@ -148,7 +169,9 @@ trap clean_up EXIT INT TERM
 # otherwise we abort and tell the user to build it.
 ensure_kernel_module() {
     local modname=$1 moddir=$2 ko=$3
-    if lsmod | grep -qE "^${modname}[[:space:]]"; then
+    # No `grep -q` here: under `set -o pipefail` an early -q exit can kill
+    # lsmod with SIGPIPE and turn "module already loaded" into rc=141.
+    if lsmod | grep -E "^${modname}[[:space:]]" >/dev/null; then
         echo "  module '$modname' already loaded"
         return 0
     fi
@@ -205,42 +228,6 @@ touch "$OUTDIR/vmstat.txt"
 done) &
 pid_vmstat=$!
 
-# --- Phase 2b: Fast-tier limit via cgroup v2 (the split ratio) ---
-# Cap the workload's fast-tier (local DRAM) footprint with a cgroup v2
-# memory.high. We use memory.high (a SOFT limit) not memory.max (HARD): under
-# memory.high the kernel reclaims/demotes the excess to the slow NUMA tier,
-# whereas a hard memory.max with no demotion path OOM-kills the workload. PACT
-# then migrates pages between tiers (cold->slow, hot->fast). A generous
-# memory.max headroom is kept so a transient spike can't OOM the run.
-# Skipped if no RSS/limit is known.
-CGROUP_PATH=""
-fast_tier_mb=""
-if [ -n "${FAST_TIER_MB:-}" ]; then
-    fast_tier_mb="$FAST_TIER_MB"
-elif [ -n "$workload_rss" ]; then
-    # fast_tier_mb = workload_rss * FAST_TIER_RATIO  (awk for float ratio)
-    fast_tier_mb=$(awk -v r="$workload_rss" -v f="$FAST_TIER_RATIO" 'BEGIN{printf "%d", r*f}')
-fi
-if [ -n "$fast_tier_mb" ] && [ "$fast_tier_mb" -gt 0 ]; then
-    CGROUP_PATH="/sys/fs/cgroup/${CGROUP_NAME}"
-    echo "=== Phase 2b: fast-tier cgroup ${CGROUP_NAME}: memory.high=${fast_tier_mb}MB"
-    echo "    (workload_rss=${workload_rss:-?}MB, FAST_TIER_RATIO=${FAST_TIER_RATIO})"
-    sudo mkdir -p "$CGROUP_PATH"
-    # Ensure the memory controller is delegated to the new cgroup's level.
-    echo "+memory" | sudo tee /sys/fs/cgroup/cgroup.subtree_control >/dev/null 2>&1 || true
-    # Soft cap drives reclaim/demotion of the excess to the slow tier:
-    echo $(( fast_tier_mb * 1024 * 1024 )) | sudo tee "$CGROUP_PATH/memory.high" >/dev/null
-    # Keep memory.max generous (RSS + 25% headroom) so a spike can't OOM:
-    if [ -n "$workload_rss" ]; then
-        echo $(( (workload_rss + workload_rss / 4) * 1024 * 1024 )) | \
-            sudo tee "$CGROUP_PATH/memory.max" >/dev/null 2>&1 || true
-    fi
-    echo "    memory.high = $(cat "$CGROUP_PATH/memory.high" 2>/dev/null) bytes"
-else
-    echo "WARNING: no <workload>_rss or FAST_TIER_MB set — running UNCAPPED"
-    echo "         (no enforced fast/slow split; PACT may have nothing to migrate)."
-fi
-
 # --- Phase 3: Launch Workload ---
 echo "=== Phase 3: Launching workload ==="
 
@@ -250,23 +237,18 @@ if [ "$enable_thp" = "true" ]; then
     echo always | sudo tee /sys/kernel/mm/transparent_hugepage/defrag >/dev/null
 fi
 
-# CPU-pin the workload but deliberately do NOT --membind it: PACT is the page
-# placer. The workload's data is pre-faulted onto the slow tier in Phase 1
-# (vmtouch --membind 1) and PACT promotes hot pages up; binding memory here
-# would defeat the experiment. Memory is capped by the cgroup above (Phase 2b).
+# CPU-pin the workload but deliberately do NOT bind its memory: PACT is the
+# page placer, and the paper's allocation policy is first-touch. Memory
+# lands on whichever tier first-touch fills (the fast tier, sized physically;
+# overflow to slow), and PACT promotes the critical pages. Binding memory
+# here would defeat the experiment. workload_cmd references $numactl_args
+# (see workloads.sh), so the CPU pinning applies to the workload binary even
+# when the command cd's first.
 numactl_args="numactl -C ${cpus} --"
 echo "  Executing: ${workload_cmd}"
+echo "    (numactl_args = ${numactl_args})"
 
-# Launch inside the fast-tier cgroup (if any): the subshell adds its own PID to
-# cgroup.procs before exec'ing the workload, so all the workload's memory is
-# accounted against memory.max.
-if [ -n "$CGROUP_PATH" ]; then
-    OMP_NUM_THREADS=${omp_threads} bash -c '
-        echo $$ | sudo tee '"$CGROUP_PATH"'/cgroup.procs >/dev/null
-        exec '"${workload_cmd}"'' >"$OUTDIR/workload.output" 2>&1 &
-else
-    OMP_NUM_THREADS=${omp_threads} eval "${workload_cmd}" >"$OUTDIR/workload.output" 2>&1 &
-fi
+OMP_NUM_THREADS=${omp_threads} eval "${workload_cmd}" >"$OUTDIR/workload.output" 2>&1 &
 WORKLOAD_PID=$!
 sleep 2
 
@@ -326,7 +308,12 @@ start_time=$(date +%s)
 # PACT needs root (euid 0) to open the CHA/uncore PMU and PEBS counters
 # (validate_hardware_access() aborts otherwise). Launch it under sudo; the
 # machine is assumed to allow passwordless sudo (CloudLab does).
-PACT_CMD="sudo numactl -C 1 $PACT \
+#
+# No core pinning by default: PACT's CPU-affinity knobs (--monitor-cpu,
+# --migration-cpu) default to -1 (unpinned), so the OS schedules the
+# coroutine event loop and the migration thread. Pin them explicitly
+# (e.g. --monitor-cpu 1 --migration-cpu 1) to reserve a dedicated core.
+PACT_CMD="sudo $PACT \
     --workload $WORKLOAD_PID \
     --pebs-period $pebs_period \
     --max-migrations-per-cycle $migration_limit \
@@ -361,6 +348,8 @@ echo "Workload finished. Runtime: ${runtime}s"
 echo "Runtime: ${runtime}s" >>"$OUTDIR/workload.output"
 
 # --- Cleanup ---
+# Disarm the EXIT trap first so clean_up runs exactly once (not again on exit).
+trap - EXIT INT TERM
 clean_up
 
 cat /proc/vmstat >"$OUTDIR/after_vmstat.log"
