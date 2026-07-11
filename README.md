@@ -111,14 +111,23 @@ Follow these steps top to bottom on a fresh machine.
 ### 1. Set up the host - [`setup/`](setup/)
 
 ```bash
-# 1a. Build, install, and boot vanilla Linux 6.3, then build the modules.
+# 1a. Build, install, and boot vanilla Linux 6.3.
 cd setup/kernel
 ./setup_kernel.sh            # clone + configure + build + install + update-grub
-# reboot into 6.3, then:
+# reboot into 6.3, then build the modules:
 ./build_modules.sh           # builds tierinit.ko and kswapdrst.ko
 
-# 1b. Prepare the machine (uncore pinning, CXL/NUMA layout, governor,
-#     disable turbo/THP/KSM/NUMA-balancing). Requires root.
+# 1b. Shrink the fast tier (node 0) with a memmap= boot parameter, then reboot
+#     again. This is what creates the fast/slow capacity split; without it the
+#     whole workload fits in local DRAM and PACT is a no-op (see setup/README).
+#     For a 1:1 split, node-0 usable DRAM = workload RSS / 2.
+#     (example for a ~19.5 GB-RSS bc-kron on c220g5, node 0 ~95 GB -> ~10 GB:)
+sudo sed -i 's/\(GRUB_CMDLINE_LINUX_DEFAULT="[^"]*\)"/\1 memmap=86G!2G"/' /etc/default/grub
+sudo update-grub && sudo reboot
+
+# 1c. Prepare the machine (uncore pinning, CXL/NUMA layout, governor,
+#     disable turbo/THP/KSM/NUMA-balancing). Requires root. Re-run after
+#     EVERY reboot, including the memmap reboot above.
 cd ../env
 sudo ./prepare_environment.sh
 ```
@@ -131,8 +140,9 @@ sudo ./prepare_environment.sh
 > `run-pact.sh` loads both and refuses to start if either is missing. See
 > [`setup/kernel/README.md`](setup/kernel/README.md).
 
-See [`setup/README.md`](setup/README.md) for details and tuning knobs
-(uncore-frequency targets, local-DRAM sizing via `memmap=`).
+See [`setup/README.md`](setup/README.md) for details: the fast-tier sizing
+table for step 1b (`memmap=` for other RSS/ratio targets) and the
+uncore-frequency tuning for step 1c.
 
 ### 2. Build the PACT runtime - [`src/`](src/)
 
