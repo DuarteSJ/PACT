@@ -109,7 +109,6 @@ echo "==> Disabling module compression to avoid 6.3.0 page fault bug..."
 ./scripts/config --disable CONFIG_MODULE_COMPRESS_ZSTD
 ./scripts/config --disable CONFIG_MODULE_DECOMPRESS
 
-
 # Boot-critical drivers MUST be built-in (=y), not modules (=m). On a typical
 # stock distro/CloudLab config the root-disk and NIC drivers ship as modules;
 # a freshly built kernel can then fail to boot because those modules are not in
@@ -133,13 +132,15 @@ for opt in \
     ./scripts/config --enable "CONFIG_${opt}"
 done
 
-# Pin the kernel release string to a plain "6.3.0" by disabling
-# LOCALVERSION_AUTO. With it on, the build appends "-dirty" (via `git describe`)
-# whenever the source tree has any uncommitted change, so the kernel boots as
-# "6.3.0" but out-of-tree modules build with vermagic "6.3.0-dirty" and the
-# kernel then REFUSES to load them ("vermagic mismatch") until a manual
-# `make clean && make`. Disabling it keeps module vermagic == running kernel.
+# Pin the kernel release string to a plain "6.3.0". Two things can pollute
+# it: LOCALVERSION_AUTO appends "-dirty" (via `git describe`) whenever the
+# source tree has any uncommitted change, so out-of-tree modules build with
+# vermagic "6.3.0-dirty" and the kernel REFUSES to load them ("vermagic
+# mismatch"); and a base config taken from the running kernel carries that
+# kernel's CONFIG_LOCALVERSION suffix into the new build, yielding a
+# misleading release string. Disable the former and clear the latter.
 ./scripts/config --disable CONFIG_LOCALVERSION_AUTO
+./scripts/config --set-str CONFIG_LOCALVERSION ""
 # Pull in any dependencies the above may require
 make olddefconfig
 
@@ -208,8 +209,9 @@ cat <<EOF
     ONE-SHOT boot; the persistent default remains ${RUNNING_KVER}.
 
     Next steps:
-      1. (Recommended) keep a serial console open in case the boot fails:
-             mclab console <experiment>        # CloudLab
+      1. (Recommended) keep a serial console open in case the boot fails
+         (on CloudLab: open the node's serial console from the portal,
+         or "ssh -p 26 <node>" to the console server)
       2. Reboot to test the new kernel once:
              sudo reboot
       3. After it comes back, confirm you are on the new kernel:

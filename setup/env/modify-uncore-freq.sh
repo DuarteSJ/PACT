@@ -2,15 +2,17 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/cxl-global.sh" || exit
 
+# Validate args BEFORE any side effect: bring_all_cpus_online below re-populates
+# node 1, so aborting after it would leave the CXL topology destroyed.
+if [[ $# != 4 ]]; then
+	echo "Usage: sudo ./modify-uncore-freq.sh [node0-min] [node0-max] [node1-min] [node1-max]"
+	exit 1
+fi
+
 echo "setting to base conf ..."
 check_base_conf
 echo "setting all cores online ..."
 bring_all_cpus_online
-
-if [[ $# != 4 ]]; then
-	echo "Usage: sudo ./modify-uncore-freq.sh [node0-min] [node0-max] [node1-min] [node1-max]"
-	exit
-fi
 
 ZERO_MIN_UNCORE_FREQ=$1
 ZERO_MAX_UNCORE_FREQ=$2

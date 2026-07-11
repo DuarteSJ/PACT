@@ -11,10 +11,10 @@ source ./cxl-global.sh || { echo "Error: cannot source ./cxl-global.sh" >&2; exi
 # Default: fast tier (node 0) pinned high, slow tier (node 1) pinned low.
 UNCORE_ARGS="${UNCORE_ARGS:-2000000 2000000 500000 500000}"
 
-echo "=== [1/3] Setting uncore frequency: $UNCORE_ARGS ==="
+echo "=== [1/4] Setting uncore frequency: $UNCORE_ARGS ==="
 ./modify-uncore-freq.sh $UNCORE_ARGS
 
-echo "=== [2/3] Configuring CXL experiment environment (check_cxl_conf) ==="
+echo "=== [2/4] Configuring CXL experiment environment (check_cxl_conf) ==="
 check_cxl_conf
 
 echo "=== [3/4] Flushing filesystem caches ==="

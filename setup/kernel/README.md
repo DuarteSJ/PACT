@@ -46,13 +46,20 @@ These need a kernel built with the following options (the provided
 
 ## 1. Build and install the 6.3 kernel
 
+`setup_kernel.sh` does everything - clone vanilla v6.3, configure, build,
+`modules_install`, `install`, and `update-grub` - and then arms a **one-shot**
+boot of the new kernel via `grub-reboot`, keeping your current kernel as the
+persistent default. So if 6.3 fails to boot (e.g. a missing built-in driver),
+the next reboot automatically falls back to the known-good kernel.
+
 ```bash
-./setup_kernel.sh                       # clone vanilla v6.3, configure, build
-cd linux
-sudo make modules_install
-sudo make install
-sudo update-grub && sudo reboot         # boot into 6.3
+./setup_kernel.sh        # build + install + arm one-shot boot of 6.3
+sudo reboot              # boot into 6.3 once; confirm with: uname -r
 ```
+
+> Do **not** run `update-grub` / `grub-set-default` yourself here - that would
+> overwrite the one-shot fallback the script set up. Only make 6.3 the
+> persistent default (`grub-set-default ...`) once you have confirmed it boots.
 
 ## 2. After rebooting into 6.3, build the modules
 
@@ -62,18 +69,19 @@ Each module has its own Makefile. Build them either way:
 ./build_modules.sh
 ```
 
-or build each separately:
+or build each separately (from `setup/kernel/`):
 
 ```bash
-cd tierinit && make        # -> tierinit.ko
-cd ../kswapdrst && make    # -> kswapdrst.ko
+make -C tierinit          # -> tierinit/tierinit.ko
+make -C kswapdrst         # -> kswapdrst/kswapdrst.ko
 ```
 
 ## 3. Load the modules
 
 `run-pact.sh` loads them automatically: if a module is already loaded it is
 kept, if its `.ko` is built it is `insmod`ed, and if it is missing the run
-aborts and asks you to build it (step 2). To load them manually:
+aborts and asks you to build it (step 2). To load them manually (from
+`setup/kernel/`):
 
 ```bash
 sudo insmod tierinit/tierinit.ko
