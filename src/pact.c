@@ -1247,19 +1247,6 @@ static int init_workload(pact_workload_t *wl, const pact_config_t *config, int m
     }
     wl->nr_cha = 0;
 
-#ifdef PACT_CGROUP_SUPPORT
-    wl->cgroup_path[0] = '\0';
-    wl->kernel_demotions = 0;
-    wl->last_kernel_demotions = 0;
-    if (config->cgroup_name[0] != '\0') {
-        snprintf(wl->cgroup_path, sizeof(wl->cgroup_path), "%s/%s", config->cgroup_dir,
-                 config->cgroup_name);
-        uint64_t baseline = pact_read_cgroup_demotion_stats(wl->cgroup_path);
-        wl->last_kernel_demotions = baseline;
-        printf("  Cgroup path: %s (baseline pgsteal: %lu)\n", wl->cgroup_path, baseline);
-    }
-#endif
-
     printf("Initialized workload: PID %d, name '%s' (%d CPUs)\n", wl->target_pid, wl->name,
            wl->nr_target_cpus);
     return 0;

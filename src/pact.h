@@ -259,16 +259,6 @@ typedef struct pact_workload {
     pact_stats_t stats;          /* Workload-specific statistics */
     uint64_t total_pebs_samples; /* Cumulative PEBS samples attributed to this workload */
 
-#ifdef PACT_CGROUP_SUPPORT
-    /* Per-cgroup demotion tracking. cgroup_path is sized to fit
-     * cgroup_dir[256] + "/" + cgroup_name[256] + NUL without snprintf
-     * truncation. When PACT_CGROUP_SUPPORT is disabled, demotion
-     * counters come from system-wide /proc/vmstat instead. */
-    char cgroup_path[520];
-    uint64_t kernel_demotions;
-    uint64_t last_kernel_demotions;
-#endif
-
     /* Workload data structures (PAC tracking + migration plumbing). */
     pac_table_t *pac_table;
     reservoir_t *reservoir;

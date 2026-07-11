@@ -20,32 +20,6 @@
 #include "utils.h"
 #include "error.h"
 
-#ifdef PACT_CGROUP_SUPPORT
-uint64_t pact_read_cgroup_demotion_stats(const char *cgroup_path)
-{
-    char stat_path[512];
-    snprintf(stat_path, sizeof(stat_path), "%s/memory.stat", cgroup_path);
-
-    FILE *fp = fopen(stat_path, "r");
-    if (!fp) {
-        return 0;
-    }
-
-    char key[128];
-    uint64_t value = 0;
-    uint64_t sum = 0;
-
-    while (fscanf(fp, "%127s %lu", key, &value) == 2) {
-        if (strcmp(key, "pgsteal_kswapd") == 0 || strcmp(key, "pgsteal_direct") == 0) {
-            sum += value;
-        }
-    }
-
-    fclose(fp);
-    return sum;
-}
-#endif
-
 int pact_compare_uint64(const void *a, const void *b)
 {
     uint64_t va = *(const uint64_t *)a;

@@ -36,11 +36,6 @@ void pact_init_config(pact_config_t *config)
      * parsing or pact_validate_configuration errors out before init. */
     config->target_pid = -1;
     config->workload_name[0] = '\0';
-#ifdef PACT_CGROUP_SUPPORT
-    config->cgroup_name[0] = '\0';
-    strncpy(config->cgroup_dir, "/sys/fs/cgroup", sizeof(config->cgroup_dir) - 1);
-    config->cgroup_dir[sizeof(config->cgroup_dir) - 1] = '\0';
-#endif
 
     /* CPU affinity (disabled by default) */
     config->monitor_cpu = -1;

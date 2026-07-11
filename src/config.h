@@ -63,10 +63,6 @@ typedef struct pact_config {
      * time. */
     pid_t target_pid;
     char workload_name[64];
-#ifdef PACT_CGROUP_SUPPORT
-    char cgroup_name[256];
-    char cgroup_dir[256];
-#endif
 
     /* CPU affinity */
     int monitor_cpu;

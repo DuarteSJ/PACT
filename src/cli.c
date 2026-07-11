@@ -151,24 +151,6 @@ int pact_parse_command_line_args(int argc, char *argv[], pact_config_t *config)
             }
             pact_signal_set_crash_marker_path(argv[i]);
             printf("Crash marker path: %s\n", argv[i]);
-#ifdef PACT_CGROUP_SUPPORT
-        } else if (strcmp(argv[i], "--cgroup-name") == 0) {
-            if (++i >= argc) {
-                fprintf(stderr, "Error: --cgroup-name requires an argument\n");
-                return -1;
-            }
-            strncpy(config->cgroup_name, argv[i], sizeof(config->cgroup_name) - 1);
-            config->cgroup_name[sizeof(config->cgroup_name) - 1] = '\0';
-            printf("Cgroup name: %s\n", config->cgroup_name);
-        } else if (strcmp(argv[i], "--cgroup-dir") == 0) {
-            if (++i >= argc) {
-                fprintf(stderr, "Error: --cgroup-dir requires an argument\n");
-                return -1;
-            }
-            strncpy(config->cgroup_dir, argv[i], sizeof(config->cgroup_dir) - 1);
-            config->cgroup_dir[sizeof(config->cgroup_dir) - 1] = '\0';
-            printf("Cgroup directory: %s\n", config->cgroup_dir);
-#endif
         } else if (strcmp(argv[i], "--pac-pool-max") == 0) {
             if (++i >= argc) {
                 fprintf(stderr,

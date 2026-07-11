@@ -54,12 +54,6 @@ int pact_compare_uint64(const void *a, const void *b);
  * Returns 0 if count==0; uses linear interpolation between adjacent values. */
 uint64_t pact_calculate_percentile(uint64_t *samples, size_t count, double percentile);
 
-#ifdef PACT_CGROUP_SUPPORT
-/* Read cumulative pgsteal_kswapd + pgsteal_direct from cgroup memory.stat.
- * Returns 0 on any error (missing file, parse failure). */
-uint64_t pact_read_cgroup_demotion_stats(const char *cgroup_path);
-#endif
-
 /* Check if all workload target PIDs have exited.
  * Returns true only if at least one workload is configured AND all have died.
  * Uses kill(pid, 0) probe — treats EPERM as "still alive". */

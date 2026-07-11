@@ -17,9 +17,6 @@
 #include "error.h"
 #include "pact.h"
 #include "balance.h"
-#ifdef PACT_CGROUP_SUPPORT
-#include "utils.h"
-#endif
 
 uint64_t read_migration_stats(const char *stat_names)
 {
@@ -67,11 +64,7 @@ void check_migration_balance(pact_context_t *pact)
         return;
     }
 
-#ifdef PACT_CGROUP_SUPPORT
-    uint64_t demoted = pact_read_cgroup_demotion_stats(pact->workload->cgroup_path);
-#else
     uint64_t demoted = read_migration_stats("pgdemote_kswapd pgdemote_direct");
-#endif
     uint64_t new_demotions = demoted - pact->workload->stats.last_demotions_successes;
     pact->workload->stats.last_demotions_successes = demoted;
     pact->workload->stats.new_demotions = new_demotions;
