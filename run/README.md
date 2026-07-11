@@ -168,7 +168,7 @@ A run writes to `results/<workload>/pact/`:
 
 | File | What it shows |
 |------|---------------|
-| `vmstat.txt` | `pgpromote*` / `pgdemote*` / `pgmigrate*` counters sampled each second |
+| `vmstat.txt` | `pgmigrate*` (PACT promotions) / `pgdemote*` (demotions) counters sampled each second |
 | `numastat.log` | the workload's per-node (node0 = fast, node1 = slow) resident memory over time |
 | `pact_debug.log` | PACT runtime log (PAC sampling, binning, migration decisions) |
 | `workload.output` | the workload's own stdout/stderr |
@@ -177,7 +177,7 @@ You don't need a golden number to confirm the pipeline works - confirm
 **movement** instead. During a healthy run:
 
 ```bash
-# promotion/demotion counters should be increasing (pages moving between tiers):
+# migration/demotion counters should be increasing (pages moving between tiers):
 tail -f results/bc_kron_8t/pact/vmstat.txt
 
 # the workload's node0 (fast-tier) footprint should grow as PACT promotes
@@ -185,12 +185,15 @@ tail -f results/bc_kron_8t/pact/vmstat.txt
 tail -f results/bc_kron_8t/pact/numastat.log
 ```
 
-If `pgpromote`/`pgmigrate` stay flat at zero, tiering is not active - re-check
-the kernel modules (`lsmod | grep -E 'tierinit|kswapdrst'`) and the CXL
-topology (`numactl --hardware`; node1 should be CPU-less). Absolute slowdown
-numbers depend on the graph size, tier latency, and DRAM budget, so compare
-PACT against a baseline run on the *same* machine rather than to a fixed
-target.
+Watch `pgmigrate_success` (PACT's `move_pages` promotions) and `pgdemote_kswapd`
+(demotions): both should climb. `pgpromote_success` stays **zero** under PACT by
+design - it counts only the kernel's own NUMA-balancing promotion path, which the
+runner disables; PACT promotes with `move_pages` instead. If `pgmigrate_success`
+stays flat at zero, tiering is not active - re-check the kernel modules
+(`lsmod | grep -E 'tierinit|kswapdrst'`) and the CXL topology
+(`numactl --hardware`; node1 should be CPU-less). Absolute slowdown numbers
+depend on the graph size, tier latency, and DRAM budget, so compare PACT against
+a baseline run on the *same* machine rather than to a fixed target.
 
 ## Quick-start checklist
 
