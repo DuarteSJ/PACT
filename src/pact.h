@@ -151,10 +151,19 @@ typedef struct {
     /* Migration statistics */
     uint64_t last_promotions_successes;
     uint64_t last_demotions_successes;
-    uint64_t promotion_attempts;
-    uint64_t promotion_successes;
-    uint64_t promotion_failures;
+    /* Written with atomic RMW by the migration thread and read as policy
+     * input (balance.c) and by the stats coroutine; _Atomic makes those
+     * cross-thread reads defined instead of benign-on-x86 races. */
+    _Atomic uint64_t promotion_attempts;
+    _Atomic uint64_t promotion_successes;
+    _Atomic uint64_t promotion_failures;
+    /* Kernel LRU demotions this run (owned by balance.c: pgdemote deltas
+     * relative to the startup baseline). */
     uint64_t demotion_successes;
+    /* Pages a promotion batch reported landing on the slow tier (owned by
+     * the migration thread) — kept separate so balance.c's overwrite of
+     * demotion_successes cannot discard these increments. */
+    _Atomic uint64_t pact_demotions;
     uint64_t new_demotions;
 
     /* PAC and memory access statistics */
@@ -309,6 +318,10 @@ struct pact_context {
      * promotions (proactive fast-tier headroom). */
     uint64_t demotion_margin;
 
+    /* Startup snapshot of the cumulative /proc/vmstat pgdemote counters;
+     * balance.c counts this run's demotions relative to it. */
+    uint64_t demotion_baseline;
+
     /* Cooling factor + trigger (Algorithm 1 α-decay). */
     double cooling_alpha;             /* 1.0 = no cooling (default) */
     uint64_t cooling_trigger_samples; /* global sample-count threshold */
@@ -354,10 +367,6 @@ extern pact_context_t *g_pact_ctx;
 /* Helper macros for easy migration */
 #define pact_system_t pact_context_t
 #define g_pact g_pact_ctx
-
-/* Coroutine management functions */
-
-void print_stats(pact_context_t *ctx);
 
 
 /* TGID filter: exact match against the workload's target_pid. */

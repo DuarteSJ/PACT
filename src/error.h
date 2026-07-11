@@ -1,8 +1,10 @@
 /* SPDX-License-Identifier: MIT */
 /* Copyright (c) 2026 MoatLab, Virginia Tech. */
 
-#ifndef __ERROR_H_
-#define __ERROR_H_
+#ifndef PACT_ERROR_H
+#define PACT_ERROR_H
+
+#include <stddef.h> /* size_t (safe_malloc/safe_calloc below) */
 
 /* Error-handling convention.
  *

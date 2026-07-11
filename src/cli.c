@@ -3,6 +3,8 @@
 
 /* cli.c — argv parsing for PACT runtime. See `pact --help` for the flag list. */
 
+#include <errno.h>
+#include <math.h> /* isfinite */
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,7 +52,17 @@ int pact_parse_command_line_args(int argc, char *argv[], pact_config_t *config)
                 fprintf(stderr, "Error: --demotion-margin requires an argument\n");
                 return -1;
             }
-            config->demotion_margin = strtoull(argv[i], NULL, 10);
+            /* strtoull silently wraps negatives ("-1" -> UINT64_MAX) and
+             * accepts trailing garbage; require a plain non-negative
+             * integer that round-trips. */
+            errno = 0;
+            char *end = NULL;
+            unsigned long long margin = strtoull(argv[i], &end, 10);
+            if (errno != 0 || end == argv[i] || *end != '\0' || argv[i][0] == '-') {
+                fprintf(stderr, "Error: --demotion-margin must be a non-negative integer\n");
+                return -1;
+            }
+            config->demotion_margin = (uint64_t)margin;
         } else if (strcmp(argv[i], "--bin-count") == 0) {
             if (++i >= argc) {
                 fprintf(stderr, "Error: --bin-count requires an argument\n");
@@ -68,8 +80,8 @@ int pact_parse_command_line_args(int argc, char *argv[], pact_config_t *config)
                 return -1;
             }
             config->bin_width = atof(argv[i]);
-            if (config->bin_width <= 0.0) {
-                fprintf(stderr, "Error: --bin-width must be > 0\n");
+            if (!(config->bin_width > 0.0) || !isfinite(config->bin_width)) {
+                fprintf(stderr, "Error: --bin-width must be a finite value > 0\n");
                 return -1;
             }
         } else if (strcmp(argv[i], "--cooling-alpha") == 0) {
@@ -78,7 +90,9 @@ int pact_parse_command_line_args(int argc, char *argv[], pact_config_t *config)
                 return -1;
             }
             config->cooling_alpha = atof(argv[i]);
-            if (config->cooling_alpha < 0.0 || config->cooling_alpha > 1.0) {
+            /* !(x >= 0 && x <= 1) also rejects NaN, which passes a
+             * naive (x < 0 || x > 1) test and corrupts the bin index. */
+            if (!(config->cooling_alpha >= 0.0 && config->cooling_alpha <= 1.0)) {
                 fprintf(stderr, "Error: --cooling-alpha must be in [0, 1]\n");
                 return -1;
             }

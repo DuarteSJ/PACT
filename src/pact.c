@@ -416,7 +416,7 @@ static void process_migration_batch_results(pact_context_t *ctx, pac_metadata_t 
                 promotion_success++;
             } else {
                 /* Demotion */
-                atomic_inc_relaxed(&ctx->workload->stats.demotion_successes);
+                atomic_inc_relaxed(&ctx->workload->stats.pact_demotions);
                 if (meta->promoted_by_pact) {
                     atomic_inc_relaxed(&ctx->workload->stats.redemotions_pact_pact);
                 }
@@ -975,8 +975,8 @@ static void pact_init(pact_context_t *pact)
 
     init_pac_metadata_pool(pact);
     if (pact->demotion_policy == DEMOTION_KERNEL_LRU) {
-        pact->workload->stats.last_demotions_successes =
-            read_migration_stats("pgdemote_kswapd pgdemote_direct");
+        pact->demotion_baseline = read_migration_stats("pgdemote_kswapd pgdemote_direct");
+        pact->workload->stats.last_demotions_successes = pact->demotion_baseline;
     }
 }
 

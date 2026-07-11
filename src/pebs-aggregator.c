@@ -56,6 +56,13 @@ typedef struct pebs_aggregator {
     /* Always-on diagnostic counters (cumulative across run) */
     uint64_t aggregation_cycles_total;      /* Total aggregation coroutine invocations */
     uint64_t aggregation_max_samples_cycle; /* High-water mark: max samples in one cycle */
+
+    /* Per-cycle sample staging: every CPU's perf buffer is drained here
+     * FIRST so the window's total sample count A_t is known before the
+     * per-sample stall scalar is computed (Algorithm 1 attributes with
+     * same-window counts). Sized to the PAC update ring capacity. */
+    uint64_t *cycle_buf;
+    int cycle_buf_cap;
 } pebs_aggregator_t;
 
 /* Initialize PEBS aggregator */
@@ -81,6 +88,14 @@ pebs_aggregator_t *pebs_aggregator_create(per_cpu_state_t *cpu_states, int num_c
     agg->num_cpus = num_cpus;
     agg->cpu_mask = cpu_mask;
     agg->last_cpu_checked = 0;
+
+    agg->cycle_buf_cap = 131072; /* == PAC update ring capacity */
+    agg->cycle_buf = malloc((size_t)agg->cycle_buf_cap * sizeof(uint64_t));
+    if (!agg->cycle_buf) {
+        free(agg->cpu_states);
+        free(agg);
+        return NULL;
+    }
 
     log_info("pebs_aggregator_create", "Created PEBS aggregator: %d CPUs, mask=0x%lx", num_cpus,
              cpu_mask);
@@ -220,112 +235,6 @@ static inline void decode_pebs_sample(const uint64_t *events, int i, uint64_t *o
     *out_tier = PEBS_DECODE_TIER(encoded);
 }
 
-int pebs_aggregate_events(pebs_aggregator_t *agg, pact_context_t *ctx, double fast_stalls,
-                          double slow_stalls)
-{
-    if (!agg || !ctx) {
-        return -1;
-    }
-
-    /* Small static buffer - 2048 entries (16KB) fits L1d. A full 1MB PEBS
-     * buffer (~5K records) is drained in 2-3 chunks through this. */
-    static uint64_t temp_events[2048];
-    int total_pushed = 0;
-    int count = 0;
-
-    /* Round-robin CPU start position for fairness.
-     * Without this, CPU 0 always goes first and CPUs later in sequence
-     * get systematically fewer samples processed when ring is full. */
-    for (int ci = 0; ci < agg->num_cpus; ci++) {
-        int cpu = (agg->last_cpu_checked + ci) % agg->num_cpus;
-        per_cpu_state_t *cpu_state = agg->cpu_states[cpu];
-
-        do {
-            /* Read events from this CPU */
-            count = read_cpu_pebs_events(agg, cpu_state, temp_events, 2048);
-            agg->events_per_cpu[cpu] += count;
-            agg->read_events_from_perf += count;
-
-            /*
-             * Process events — direct PAC update in coroutine mode,
-             * ring buffer push in thread mode.
-             *
-             * In coroutine mode, aggregator and PAC coroutine run on the same
-             * thread via cooperative switching — they never run concurrently.
-             * The ring buffer is pure overhead: encode→push→yield→pop→decode→update.
-             * Direct update_pac_entry() call eliminates 6 steps → 1 step.
-             *
-             * Keep ring buffer path for migration thread mode where the ring
-             * bridges aggregator thread and migration thread.
-             */
-            int pac_count = 0;
-            bool ring_blocked = false;
-
-            int log_wl_id = 0;
-            for (int i = 0; i < count; i++) {
-                uint64_t addr;
-                uint8_t tier;
-                decode_pebs_sample(temp_events, i, &addr, &tier);
-                uint64_t page = addr & PAGE_MASK;
-                uint32_t attributed = compute_sample_stalls(tier, fast_stalls, slow_stalls);
-                log_pebs_sample(ctx, "pebs_aggregate_events", log_wl_id, addr, tier, attributed);
-
-                /* Push to PAC update ring; drained by the adaptive coroutine. */
-                uint64_t pac_encoded = PEBS_ENCODE_PAC(attributed, page, tier);
-                if (ring_buffer_uint64_push(ctx->pac_update_ring, pac_encoded) == 0) {
-                    agg->dropped_events_update_full++;
-                    if (pac_count == 0) {
-                        ring_blocked = true;
-                        /* Count the rest of this already-read batch as
-                         * dropped too before bailing to the drain phase. */
-                        agg->dropped_events_update_full += (uint64_t)(count - i - 1);
-                        break;
-                    }
-                } else {
-                    pac_count++;
-                }
-            }
-
-            agg->pushed_events_to_update += pac_count;
-            total_pushed += pac_count;
-            if (ring_blocked) {
-                goto next_cpu;
-            }
-        } while (count > 0);
-    next_cpu:
-        /* Exhaust remaining perf buffer even if pac_update_ring is full */
-        while (count > 0) {
-            count = read_cpu_pebs_events(agg, cpu_state, temp_events, 2048);
-            agg->read_events_from_perf += count;
-            agg->dropped_events_update_full += count;
-            agg->dropped_events_workload += count;
-        }
-    }
-    /* Advance round-robin start position */
-    agg->last_cpu_checked = (agg->last_cpu_checked + 1) % agg->num_cpus;
-
-    /* Aggregation cycle counters */
-    agg->aggregation_cycles_total++;
-    if ((uint64_t)total_pushed > agg->aggregation_max_samples_cycle) {
-        agg->aggregation_max_samples_cycle = total_pushed;
-    }
-
-    return total_pushed;
-}
-
-/* Reset per-cycle drop/lost counters at the top of each aggregation
- * iteration. events_per_workload_per_tier is intentionally NOT cleared here —
- * the previous cycle's counts feed attributed-stalls computation below. */
-static void reset_per_cycle_counters(pebs_aggregator_t *agg)
-{
-    agg->read_events_from_perf = 0;
-    agg->pushed_events_to_update = 0;
-    agg->dropped_events_update_full = 0;
-    agg->dropped_events_workload = 0;
-    agg->lost_samples = 0;
-    agg->lost_events = 0;
-}
-
 /* Per-workload attributed stalls = k_constant * llc_misses / (mlp * events).
  * The /pebs_sampling_period division is intentionally absent: LDLAT filtering,
  * ring drops, and quiet-skip losses break the ideal ev≈miss/period identity,
@@ -344,6 +253,102 @@ static void compute_attributed_stalls(pact_context_t *ctx, pebs_aggregator_t *ag
     if (slow_coeff > 0) {
         *out_slow_stalls = (ctx->k_constant_cxl * wl->stats.llc_misses_slow) / slow_coeff;
     }
+}
+
+/*
+ * Drain, attribute, and publish one window's PEBS samples.
+ *
+ * Phase A drains every CPU's perf buffer into cycle_buf so the window's
+ * per-tier sample population is known; phase B then computes the per-tier
+ * stall scalar from THIS window's counters and counts (Algorithm 1: S_p =
+ * S * A_p / A_t with all terms from the same window) and pushes each
+ * attributed sample to the PAC update ring.
+ */
+int pebs_aggregate_events(pebs_aggregator_t *agg, pact_context_t *ctx)
+{
+    if (!agg || !ctx) {
+        return -1;
+    }
+
+    /* Phase A: drain all CPUs into the staging buffer. Round-robin start
+     * keeps CPU 0 from monopolizing the buffer when it fills. */
+    int n = 0;
+    for (int ci = 0; ci < agg->num_cpus; ci++) {
+        int cpu = (agg->last_cpu_checked + ci) % agg->num_cpus;
+        per_cpu_state_t *cpu_state = agg->cpu_states[cpu];
+
+        int count;
+        do {
+            int room = agg->cycle_buf_cap - n;
+            if (room == 0) {
+                break;
+            }
+            count =
+                read_cpu_pebs_events(agg, cpu_state, agg->cycle_buf + n, room < 2048 ? room : 2048);
+            agg->events_per_cpu[cpu] += count;
+            agg->read_events_from_perf += count;
+            n += count;
+        } while (count > 0);
+
+        /* Staging full: exhaust this CPU's perf buffer into drop counters
+         * so the producer ring cannot wedge. */
+        if (n == agg->cycle_buf_cap) {
+            uint64_t scratch[512];
+            int dropped;
+            while ((dropped = read_cpu_pebs_events(agg, cpu_state, scratch, 512)) > 0) {
+                agg->read_events_from_perf += dropped;
+                agg->dropped_events_update_full += dropped;
+                agg->dropped_events_workload += dropped;
+            }
+        }
+    }
+    agg->last_cpu_checked = (agg->last_cpu_checked + 1) % agg->num_cpus;
+
+    /* Phase B: same-window attribution. events_per_tier was populated by
+     * the phase-A reads; the LLC-miss and MLP inputs were read from the
+     * PMU for this same window just before this call. */
+    double fast_stalls = 0.0, slow_stalls = 0.0;
+    compute_attributed_stalls(ctx, agg, &fast_stalls, &slow_stalls);
+
+    int pac_count = 0;
+    for (int i = 0; i < n; i++) {
+        uint64_t addr;
+        uint8_t tier;
+        decode_pebs_sample(agg->cycle_buf, i, &addr, &tier);
+        uint64_t page = addr & PAGE_MASK;
+        uint32_t attributed = compute_sample_stalls(tier, fast_stalls, slow_stalls);
+        log_pebs_sample(ctx, "pebs_aggregate_events", 0, addr, tier, attributed);
+
+        uint64_t pac_encoded = PEBS_ENCODE_PAC(attributed, page, tier);
+        if (ring_buffer_uint64_push(ctx->pac_update_ring, pac_encoded) == 0) {
+            /* Ring full; the adaptive coroutine drains it on this same
+             * thread, so nothing frees up mid-loop. Drop the rest. */
+            agg->dropped_events_update_full += (uint64_t)(n - i);
+            break;
+        }
+        pac_count++;
+    }
+
+    agg->pushed_events_to_update += pac_count;
+
+    agg->aggregation_cycles_total++;
+    if ((uint64_t)pac_count > agg->aggregation_max_samples_cycle) {
+        agg->aggregation_max_samples_cycle = pac_count;
+    }
+
+    return pac_count;
+}
+
+/* Reset per-cycle drop/lost counters at the top of each aggregation
+ * iteration. */
+static void reset_per_cycle_counters(pebs_aggregator_t *agg)
+{
+    agg->read_events_from_perf = 0;
+    agg->pushed_events_to_update = 0;
+    agg->dropped_events_update_full = 0;
+    agg->dropped_events_workload = 0;
+    agg->lost_samples = 0;
+    agg->lost_events = 0;
 }
 
 /* Periodic check for workload exit. With per-PID inherit counting events
@@ -399,9 +404,11 @@ void pebs_aggregator_coroutine(mco_coro *co)
 
     while (ctx->running) {
         reset_per_cycle_counters(agg);
-        /* NOTE: events_per_tier is left intact here; it carries the PREVIOUS
-         * cycle's counts into attributed-stalls computation, then is zeroed
-         * below before pebs_aggregate_events repopulates. */
+        /* Fresh per-tier sample counts for this window; phase A of
+         * pebs_aggregate_events repopulates them from the drained samples
+         * so attribution divides by this window's population. */
+        agg->events_per_tier[0] = 0;
+        agg->events_per_tier[1] = 0;
 
         /* turn off pmu counters */
         stop_pmu_perf_events(ctx);
@@ -416,24 +423,14 @@ void pebs_aggregator_coroutine(mco_coro *co)
             break;
         }
 
-        double fast_tier_attributed_stalls = 0.0;
-        double slow_tier_attributed_stalls = 0.0;
-        compute_attributed_stalls(ctx, agg, &fast_tier_attributed_stalls,
-                                  &slow_tier_attributed_stalls);
-
-        /* Accumulate per-workload PEBS samples into cumulative counter */
-        ctx->workload->total_pebs_samples += agg->events_per_tier[0] + agg->events_per_tier[1];
-
-        /* Reset per-tier event counters for new interval. */
-        agg->events_per_tier[0] = 0;
-        agg->events_per_tier[1] = 0;
-
         /* reset and turn back on pmu counters before aggregation to minimize dead time */
         start_pmu_perf_events(ctx);
 
-        /* Aggregate events from all CPUs and push directly to pac_update_ring */
-        int aggregated = pebs_aggregate_events(agg, ctx, fast_tier_attributed_stalls,
-                                               slow_tier_attributed_stalls);
+        /* Drain, attribute (same-window), and publish this window's samples */
+        int aggregated = pebs_aggregate_events(agg, ctx);
+
+        /* Accumulate per-workload PEBS samples into cumulative counter */
+        ctx->workload->total_pebs_samples += agg->events_per_tier[0] + agg->events_per_tier[1];
 
         /* Log workload PMU stats (after aggregation so event counts are available) */
         log_pmu(ctx, "pebs_aggregator_coroutine", 0, ctx->workload->workload_mlp_fast,
@@ -506,6 +503,7 @@ void pebs_aggregator_destroy(pebs_aggregator_t *agg)
 
     log_info("pebs_aggregator_destroy", "Destroying PEBS aggregator");
 
+    free(agg->cycle_buf);
     free(agg->cpu_states);
     free(agg);
 }

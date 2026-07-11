@@ -8,8 +8,8 @@
  * `get_total_capacity()`.
  *====================================================================*/
 
-#ifndef __OBJPOOL_H__
-#define __OBJPOOL_H__
+#ifndef PACT_OBJ_POOL_H
+#define PACT_OBJ_POOL_H
 
 #include <stddef.h>  /* size_t */
 #include <stdbool.h> /* bool */

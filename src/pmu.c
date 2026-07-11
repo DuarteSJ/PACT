@@ -609,29 +609,37 @@ void scale_multiplexed_events(event_group_t *event_group)
  * outstanding TOR entry. Occupancy and cycle deltas are summed across all
  * of the workload's CHAs before dividing, so each tier yields one ratio
  * per sampling window. Counters are IOC_RESET at window start, so group
- * values are true window deltas; the multiplexing scale factor is common
- * to both events of a group and cancels in the ratio.
+ * values are true window deltas; each group's values were already
+ * multiplex-corrected by scale_multiplexed_events(), so summing across
+ * groups with different schedule fractions is sound.
  */
 static double calculate_tier_mlp(pact_workload_t *wl, int tier)
 {
     uint64_t sum_occupancy = 0;
     uint64_t sum_cycles = 0;
+    int valid_groups = 0;
 
     for (int cha = 0; cha < wl->nr_cha; cha++) {
         event_group_t *group =
             (tier == 0) ? &wl->cha_pmus[cha].group_fast : &wl->cha_pmus[cha].group_slow;
 
-        /* Skip groups scheduled for under 1 ms of the window; their
-         * scaled-up readings are noise. */
-        if (group->time_running < 1000000) {
+        /* Skip groups scheduled for under 1 ms of THIS window; their
+         * scaled-up readings are noise. time_running is cumulative since
+         * open (IOC_RESET clears only counter values), so the window's
+         * share is the delta against the previous read. */
+        if (group->time_running - group->last_time_running < 1000000) {
             continue;
         }
+        valid_groups++;
         sum_occupancy += group->values[CHA_TOR_OCCUPANCY];
         sum_cycles += group->values[CHA_TOR_CYCLES];
     }
 
+    if (valid_groups == 0) {
+        return -1.0; /* no valid measurement this window (all multiplexed out) */
+    }
     if (sum_occupancy == 0 || sum_cycles == 0) {
-        return g_pmu_platform.mlp_min; /* no traffic to this tier this window */
+        return g_pmu_platform.mlp_min; /* measured, but no traffic to this tier */
     }
 
     double mlp = (double)sum_occupancy / (double)sum_cycles;
@@ -644,11 +652,21 @@ static double calculate_tier_mlp(pact_workload_t *wl, int tier)
     return mlp;
 }
 
-/* Fresh per-tier MLP ratios for this window; no cross-window smoothing. */
+/* Fresh per-tier MLP ratios for this window; no cross-window smoothing.
+ * A window with no valid measurement (every CHA group multiplexed out)
+ * keeps the previous window's value instead of fabricating the minimum,
+ * which would over-attribute stalls for that window. */
 static void calculate_workload_mlp(pact_workload_t *wl)
 {
-    wl->workload_mlp_fast = calculate_tier_mlp(wl, 0);
-    wl->workload_mlp_slow = calculate_tier_mlp(wl, 1);
+    double fast = calculate_tier_mlp(wl, 0);
+    double slow = calculate_tier_mlp(wl, 1);
+
+    if (fast >= 0.0) {
+        wl->workload_mlp_fast = fast;
+    }
+    if (slow >= 0.0) {
+        wl->workload_mlp_slow = slow;
+    }
 }
 
 /* Read the per-PID counting group (single fd with inherit=1, aggregating

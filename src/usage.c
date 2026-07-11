@@ -26,7 +26,7 @@ void pact_print_usage(const char *prog_name)
            "slow tier, and\n");
     printf("              CHA/uncore counters measure memory-level parallelism "
            "(MLP).\n");
-    printf("  2. SCORE    Each page gets a PAC (Performance-criticAlity) value, "
+    printf("  2. SCORE    Each page gets a PAC (Per-page Access Criticality) value, "
            "~ stalled cycles\n");
     printf("              attributable to it (LLC misses weighted by tier latency / "
            "MLP). High\n");
@@ -88,7 +88,8 @@ void pact_print_usage(const char *prog_name)
     printf("\nDiagnostics:\n");
     printf("  --crash-marker PATH               Write an ok/crash marker file "
            "on exit.\n");
-    printf("  -l, --logging [FORMAT]            Enable logging (csv | json).\n");
+    printf("  -l, --logging [FORMAT]            Enable logging (csv | json); "
+           "requires a `make logging` build.\n");
     printf("  --log-file PATH                   Log file path.\n");
     printf("  --log-level LEVEL                 0=error 1=warn 2=info 3=trace "
            "(default 2).\n");

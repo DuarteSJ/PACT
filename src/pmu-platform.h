@@ -1,8 +1,8 @@
 /* SPDX-License-Identifier: MIT */
 /* Copyright (c) 2026 MoatLab, Virginia Tech. */
 
-#ifndef __PMU_PLATFORM_H_
-#define __PMU_PLATFORM_H_
+#ifndef PACT_PMU_PLATFORM_H
+#define PACT_PMU_PLATFORM_H
 
 #include <stdint.h>
 

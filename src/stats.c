@@ -21,7 +21,8 @@ static void print_basic_stats(pact_context_t *pact)
     printf("LLC Misses (slow): %lu\n", pact->workload->stats.llc_misses_slow);
     printf("PAC Updates: %lu\n", pact->workload->stats.pac_updates);
     printf("Promotions (successful): %lu\n", pact->workload->stats.promotion_successes);
-    printf("Demotions (successful): %lu\n", pact->workload->stats.demotion_successes);
+    printf("Demotions (kernel LRU): %lu\n", pact->workload->stats.demotion_successes);
+    printf("Demotions (batch results): %lu\n", pact->workload->stats.pact_demotions);
 }
 
 static void print_pingpong_stats(pact_context_t *pact)

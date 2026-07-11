@@ -33,8 +33,7 @@ pebs_aggregator_t *pebs_aggregator_create(per_cpu_state_t *cpu_states, int num_c
  * @slow_stalls: Slow tier attributed stalls (workload-scoped)
  * @return: Number of events pushed to pac_update_ring, or -1 on error
  */
-int pebs_aggregate_events(pebs_aggregator_t *agg, pact_context_t *ctx, double fast_stalls,
-                          double slow_stalls);
+int pebs_aggregate_events(pebs_aggregator_t *agg, pact_context_t *ctx);
 
 /*
  * PEBS aggregator coroutine
