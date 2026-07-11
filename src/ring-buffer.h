@@ -46,144 +46,144 @@
  * @param type The data type of the elements to be stored in the buffer.
  * @param name A suffix to be added to all function and type names to make them unique.
  */
-#define DEFINE_RING_BUFFER(type, name)                                                             \
-                                                                                                   \
-    typedef struct {                                                                               \
-        /* Read-only after create(): isolated on its own line. */                                  \
-        type *buffer;                                                                              \
-        size_t size;                                                                               \
-        size_t mask;                                                                               \
-        /* Producer-owned head and consumer-owned tail, each on its own line. */                   \
-        alignas(RING_BUFFER_CACHELINE) _Atomic size_t head;                                        \
-        alignas(RING_BUFFER_CACHELINE) _Atomic size_t tail;                                        \
-        char _pad_end[RING_BUFFER_CACHELINE - sizeof(_Atomic size_t)];                              \
-    } ring_buffer_##name##_t;                                                                      \
-                                                                                                   \
-    static inline ring_buffer_##name##_t *ring_buffer_##name##_create(size_t size)                 \
-    {                                                                                              \
-        /* Ensure size is a power of 2 for efficient masking */                                    \
-        if (size < 2) {                                                                            \
-            size = 2;                                                                              \
-        }                                                                                          \
-        if ((size & (size - 1)) != 0) {                                                            \
-            size_t new_size = 1;                                                                   \
-            while (new_size < size)                                                                \
-                new_size <<= 1;                                                                    \
-            size = new_size;                                                                       \
-        }                                                                                          \
-                                                                                                   \
+#define DEFINE_RING_BUFFER(type, name)                                                               \
+                                                                                                     \
+    typedef struct {                                                                                 \
+        /* Read-only after create(): isolated on its own line. */                                    \
+        type *buffer;                                                                                \
+        size_t size;                                                                                 \
+        size_t mask;                                                                                 \
+        /* Producer-owned head and consumer-owned tail, each on its own line. */                     \
+        alignas(RING_BUFFER_CACHELINE) _Atomic size_t head;                                          \
+        alignas(RING_BUFFER_CACHELINE) _Atomic size_t tail;                                          \
+        char _pad_end[RING_BUFFER_CACHELINE - sizeof(_Atomic size_t)];                               \
+    } ring_buffer_##name##_t;                                                                        \
+                                                                                                     \
+    static inline ring_buffer_##name##_t *ring_buffer_##name##_create(size_t size)                   \
+    {                                                                                                \
+        /* Ensure size is a power of 2 for efficient masking */                                      \
+        if (size < 2) {                                                                              \
+            size = 2;                                                                                \
+        }                                                                                            \
+        if ((size & (size - 1)) != 0) {                                                              \
+            size_t new_size = 1;                                                                     \
+            while (new_size < size)                                                                  \
+                new_size <<= 1;                                                                      \
+            size = new_size;                                                                         \
+        }                                                                                            \
+                                                                                                     \
         /* aligned_alloc needs size a multiple of alignment; sizeof(struct) is                     \
-         * a multiple of RING_BUFFER_CACHELINE because of the alignas above. */                    \
-        ring_buffer_##name##_t *rb = aligned_alloc(RING_BUFFER_CACHELINE,                           \
-                                                   sizeof(ring_buffer_##name##_t));                 \
-        if (!rb)                                                                                   \
-            return NULL;                                                                           \
-        memset(rb, 0, sizeof(*rb));                                                                \
-                                                                                                   \
-        rb->buffer = calloc(size, sizeof(type));                                                   \
-        if (!rb->buffer) {                                                                         \
-            free(rb);                                                                              \
-            return NULL;                                                                           \
-        }                                                                                          \
-                                                                                                   \
-        rb->size = size;                                                                           \
-        rb->mask = size - 1;                                                                       \
-        atomic_store_explicit(&rb->head, 0, memory_order_relaxed);                                 \
-        atomic_store_explicit(&rb->tail, 0, memory_order_relaxed);                                 \
-                                                                                                   \
-        return rb;                                                                                 \
-    }                                                                                              \
-                                                                                                   \
-    static inline void ring_buffer_##name##_destroy(ring_buffer_##name##_t *rb)                    \
-    {                                                                                              \
-        if (!rb)                                                                                   \
-            return;                                                                                \
-        free(rb->buffer);                                                                          \
-        free(rb);                                                                                  \
-    }                                                                                              \
-                                                                                                   \
-    /* Producer side. */                                                                           \
-    static inline bool ring_buffer_##name##_push(ring_buffer_##name##_t *rb, type value)           \
-    {                                                                                              \
-        size_t head = atomic_load_explicit(&rb->head, memory_order_relaxed);                       \
-        size_t next_head = (head + 1) & rb->mask;                                                  \
-        if (next_head == atomic_load_explicit(&rb->tail, memory_order_acquire)) {                  \
-            return false; /* Buffer is Full */                                                     \
-        }                                                                                          \
-        rb->buffer[head] = value;                                                                  \
-        atomic_store_explicit(&rb->head, next_head, memory_order_release);                         \
-        return true;                                                                               \
-    }                                                                                              \
-                                                                                                   \
-    /* Consumer side. */                                                                           \
-    static inline bool ring_buffer_##name##_pop(ring_buffer_##name##_t *rb, type *value)           \
-    {                                                                                              \
-        size_t tail = atomic_load_explicit(&rb->tail, memory_order_relaxed);                       \
-        if (tail == atomic_load_explicit(&rb->head, memory_order_acquire)) {                       \
-            return false; /* Buffer is Empty */                                                    \
-        }                                                                                          \
-        *value = rb->buffer[tail];                                                                 \
-        atomic_store_explicit(&rb->tail, (tail + 1) & rb->mask, memory_order_release);             \
-        return true;                                                                               \
-    }                                                                                              \
-                                                                                                   \
-    /* Consumer side: inspect the front element without consuming it. */                           \
-    static inline bool ring_buffer_##name##_peek(ring_buffer_##name##_t *rb, type *value)          \
-    {                                                                                              \
-        size_t tail = atomic_load_explicit(&rb->tail, memory_order_relaxed);                       \
-        if (tail == atomic_load_explicit(&rb->head, memory_order_acquire)) {                       \
-            return false; /* Buffer is Empty */                                                    \
-        }                                                                                          \
-        *value = rb->buffer[tail];                                                                 \
-        return true;                                                                               \
-    }                                                                                              \
-                                                                                                   \
+         * a multiple of RING_BUFFER_CACHELINE because of the alignas above. */ \
+        ring_buffer_##name##_t *rb =                                                                 \
+            aligned_alloc(RING_BUFFER_CACHELINE, sizeof(ring_buffer_##name##_t));                    \
+        if (!rb)                                                                                     \
+            return NULL;                                                                             \
+        memset(rb, 0, sizeof(*rb));                                                                  \
+                                                                                                     \
+        rb->buffer = calloc(size, sizeof(type));                                                     \
+        if (!rb->buffer) {                                                                           \
+            free(rb);                                                                                \
+            return NULL;                                                                             \
+        }                                                                                            \
+                                                                                                     \
+        rb->size = size;                                                                             \
+        rb->mask = size - 1;                                                                         \
+        atomic_store_explicit(&rb->head, 0, memory_order_relaxed);                                   \
+        atomic_store_explicit(&rb->tail, 0, memory_order_relaxed);                                   \
+                                                                                                     \
+        return rb;                                                                                   \
+    }                                                                                                \
+                                                                                                     \
+    static inline void ring_buffer_##name##_destroy(ring_buffer_##name##_t *rb)                      \
+    {                                                                                                \
+        if (!rb)                                                                                     \
+            return;                                                                                  \
+        free(rb->buffer);                                                                            \
+        free(rb);                                                                                    \
+    }                                                                                                \
+                                                                                                     \
+    /* Producer side. */                                                                             \
+    static inline bool ring_buffer_##name##_push(ring_buffer_##name##_t *rb, type value)             \
+    {                                                                                                \
+        size_t head = atomic_load_explicit(&rb->head, memory_order_relaxed);                         \
+        size_t next_head = (head + 1) & rb->mask;                                                    \
+        if (next_head == atomic_load_explicit(&rb->tail, memory_order_acquire)) {                    \
+            return false; /* Buffer is Full */                                                       \
+        }                                                                                            \
+        rb->buffer[head] = value;                                                                    \
+        atomic_store_explicit(&rb->head, next_head, memory_order_release);                           \
+        return true;                                                                                 \
+    }                                                                                                \
+                                                                                                     \
+    /* Consumer side. */                                                                             \
+    static inline bool ring_buffer_##name##_pop(ring_buffer_##name##_t *rb, type *value)             \
+    {                                                                                                \
+        size_t tail = atomic_load_explicit(&rb->tail, memory_order_relaxed);                         \
+        if (tail == atomic_load_explicit(&rb->head, memory_order_acquire)) {                         \
+            return false; /* Buffer is Empty */                                                      \
+        }                                                                                            \
+        *value = rb->buffer[tail];                                                                   \
+        atomic_store_explicit(&rb->tail, (tail + 1) & rb->mask, memory_order_release);               \
+        return true;                                                                                 \
+    }                                                                                                \
+                                                                                                     \
+    /* Consumer side: inspect the front element without consuming it. */                             \
+    static inline bool ring_buffer_##name##_peek(ring_buffer_##name##_t *rb, type *value)            \
+    {                                                                                                \
+        size_t tail = atomic_load_explicit(&rb->tail, memory_order_relaxed);                         \
+        if (tail == atomic_load_explicit(&rb->head, memory_order_acquire)) {                         \
+            return false; /* Buffer is Empty */                                                      \
+        }                                                                                            \
+        *value = rb->buffer[tail];                                                                   \
+        return true;                                                                                 \
+    }                                                                                                \
+                                                                                                     \
     /* Consumer side: snapshot head once (acquire), drain up to `max`, then                        \
-     * publish the new tail once (release). */                                                     \
-    static inline int ring_buffer_##name##_pop_batch(ring_buffer_##name##_t *rb, type *values,     \
-                                                     int max)                                      \
-    {                                                                                              \
-        size_t tail = atomic_load_explicit(&rb->tail, memory_order_relaxed);                       \
-        size_t head = atomic_load_explicit(&rb->head, memory_order_acquire);                       \
-        int count = 0;                                                                             \
-        while (count < max && tail != head) {                                                      \
-            values[count++] = rb->buffer[tail];                                                    \
-            tail = (tail + 1) & rb->mask;                                                          \
-        }                                                                                          \
-        if (count > 0) {                                                                           \
-            atomic_store_explicit(&rb->tail, tail, memory_order_release);                          \
-        }                                                                                          \
-        return count;                                                                              \
-    }                                                                                              \
-                                                                                                   \
+     * publish the new tail once (release). */ \
+    static inline int ring_buffer_##name##_pop_batch(ring_buffer_##name##_t *rb, type *values,       \
+                                                     int max)                                        \
+    {                                                                                                \
+        size_t tail = atomic_load_explicit(&rb->tail, memory_order_relaxed);                         \
+        size_t head = atomic_load_explicit(&rb->head, memory_order_acquire);                         \
+        int count = 0;                                                                               \
+        while (count < max && tail != head) {                                                        \
+            values[count++] = rb->buffer[tail];                                                      \
+            tail = (tail + 1) & rb->mask;                                                            \
+        }                                                                                            \
+        if (count > 0) {                                                                             \
+            atomic_store_explicit(&rb->tail, tail, memory_order_release);                            \
+        }                                                                                            \
+        return count;                                                                                \
+    }                                                                                                \
+                                                                                                     \
     /* Producer side: snapshot tail once (acquire), fill up to `n`, then                           \
-     * publish the new head once (release). */                                                     \
-    static inline int ring_buffer_##name##_push_batch(ring_buffer_##name##_t *rb, type *values,    \
-                                                      int n)                                       \
-    {                                                                                              \
-        size_t head = atomic_load_explicit(&rb->head, memory_order_relaxed);                       \
-        size_t tail = atomic_load_explicit(&rb->tail, memory_order_acquire);                       \
-        int count = 0;                                                                             \
-        while (count < n) {                                                                        \
-            size_t next_head = (head + 1) & rb->mask;                                              \
-            if (next_head == tail)                                                                 \
-                break;                                                                             \
-            rb->buffer[head] = values[count++];                                                    \
-            head = next_head;                                                                      \
-        }                                                                                          \
-        if (count > 0) {                                                                           \
-            atomic_store_explicit(&rb->head, head, memory_order_release);                          \
-        }                                                                                          \
-        return count;                                                                              \
-    }                                                                                              \
-                                                                                                   \
+     * publish the new head once (release). */ \
+    static inline int ring_buffer_##name##_push_batch(ring_buffer_##name##_t *rb, type *values,      \
+                                                      int n)                                         \
+    {                                                                                                \
+        size_t head = atomic_load_explicit(&rb->head, memory_order_relaxed);                         \
+        size_t tail = atomic_load_explicit(&rb->tail, memory_order_acquire);                         \
+        int count = 0;                                                                               \
+        while (count < n) {                                                                          \
+            size_t next_head = (head + 1) & rb->mask;                                                \
+            if (next_head == tail)                                                                   \
+                break;                                                                               \
+            rb->buffer[head] = values[count++];                                                      \
+            head = next_head;                                                                        \
+        }                                                                                            \
+        if (count > 0) {                                                                             \
+            atomic_store_explicit(&rb->head, head, memory_order_release);                            \
+        }                                                                                            \
+        return count;                                                                                \
+    }                                                                                                \
+                                                                                                     \
     /* Approximate occupancy. Safe to call from either side; uses acquire loads                    \
-     * so a consumer using it as a drain gate sees published producer writes. */                   \
-    static inline size_t ring_buffer_##name##_size(ring_buffer_##name##_t *rb)                     \
-    {                                                                                              \
-        size_t head = atomic_load_explicit(&rb->head, memory_order_acquire);                       \
-        size_t tail = atomic_load_explicit(&rb->tail, memory_order_acquire);                       \
-        return (head - tail) & rb->mask;                                                           \
+     * so a consumer using it as a drain gate sees published producer writes. */ \
+    static inline size_t ring_buffer_##name##_size(ring_buffer_##name##_t *rb)                       \
+    {                                                                                                \
+        size_t head = atomic_load_explicit(&rb->head, memory_order_acquire);                         \
+        size_t tail = atomic_load_explicit(&rb->tail, memory_order_acquire);                         \
+        return (head - tail) & rb->mask;                                                             \
     }
 
 #endif // RING_BUFFER_H
