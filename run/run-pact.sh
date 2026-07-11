@@ -144,8 +144,15 @@ clean_up() {
         [ -n "$pgid" ] && sudo kill -KILL -- "-$pgid" 2>/dev/null || true
     fi
 
-    kill "${pid_vmstat:-}" 2>/dev/null || true
-    kill "${pid_numastat:-}" 2>/dev/null || true
+    # Reap the vmstat/numastat monitor loops. Kill each subshell AND its
+    # current child (the in-flight numastat/grep), otherwise that child keeps
+    # running and holds the script's stdout open, so a piped reader never sees
+    # EOF and the run appears to hang after the workload has finished.
+    for mon in "${pid_vmstat:-}" "${pid_numastat:-}"; do
+        [ -n "$mon" ] || continue
+        pkill -P "$mon" 2>/dev/null || true
+        kill "$mon" 2>/dev/null || true
+    done
 
     echo "  Disabling demotion_enabled..."
     echo 0 | sudo tee /sys/kernel/mm/numa/demotion_enabled >/dev/null 2>&1 || true
