@@ -22,6 +22,7 @@ void pact_init_config(pact_config_t *config)
     config->adaptive_interval_ms = PACT_DEFAULT_ADAPTIVE_INTERVAL_MS;
     config->stats_interval_ms = PACT_DEFAULT_STATS_INTERVAL_MS;
     config->max_migrations_per_cycle = PACT_DEFAULT_MAX_MIGRATIONS_PER_CYCLE;
+    config->demotion_margin = 0;
     config->enable_logging = false;
     config->log_file[0] = '\0';
     strncpy(config->log_format, "csv", sizeof(config->log_format) - 1);

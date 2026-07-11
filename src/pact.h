@@ -321,6 +321,12 @@ struct pact_context {
 
     uint32_t max_migrations_per_cycle;
 
+    /* Demotion aggressiveness m (Algorithm 2): kernel LRU demotion stays
+     * enabled while N_demoted < N_promoted + m. m = 0 balances demotions
+     * against promotions; larger m keeps demotion running ahead of
+     * promotions (proactive fast-tier headroom). */
+    uint64_t demotion_margin;
+
     /* Cooling factor + trigger (Algorithm 1 α-decay). */
     double cooling_alpha;             /* 1.0 = no cooling (default) */
     uint64_t cooling_trigger_samples; /* global sample-count threshold */

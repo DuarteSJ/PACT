@@ -1331,6 +1331,7 @@ static void copy_policy_and_intervals(pact_context_t *pact, const pact_config_t 
     pact->adaptive_interval_ms = config->adaptive_interval_ms;
     pact->stats_interval_ms = config->stats_interval_ms;
     pact->max_migrations_per_cycle = config->max_migrations_per_cycle;
+    pact->demotion_margin = config->demotion_margin;
     pact->enable_logging = config->enable_logging;
 }
 

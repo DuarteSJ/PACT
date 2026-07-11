@@ -49,6 +49,7 @@ typedef struct pact_config {
     uint32_t adaptive_interval_ms;
     uint32_t stats_interval_ms;
     uint32_t max_migrations_per_cycle;
+    uint64_t demotion_margin; /* Algorithm 2 aggressiveness m (default 0) */
     uint64_t pebs_period;
     uint32_t bin_count;
     double bin_width;

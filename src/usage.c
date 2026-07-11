@@ -68,6 +68,11 @@ void pact_print_usage(const char *prog_name)
            "(default 200000).\n");
     printf("  --pac-pool-max N                  Max tracked pages "
            "(default 2097152).\n");
+    printf("  --demotion-margin M               Keep kernel demotion on while "
+           "demoted <\n");
+    printf("                                    promoted + M pages; larger M = more "
+           "proactive\n");
+    printf("                                    fast-tier headroom (default 0).\n");
 
     printf("\nTiming (milliseconds):\n");
     printf("  --sampling-interval MS            Sampling cadence (default 20).\n");

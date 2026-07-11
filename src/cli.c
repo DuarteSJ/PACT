@@ -40,6 +40,12 @@ int pact_parse_command_line_args(int argc, char *argv[], pact_config_t *config)
                 return -1;
             }
             config->max_migrations_per_cycle = atoi(argv[i]);
+        } else if (strcmp(argv[i], "--demotion-margin") == 0) {
+            if (++i >= argc) {
+                fprintf(stderr, "Error: --demotion-margin requires an argument\n");
+                return -1;
+            }
+            config->demotion_margin = strtoull(argv[i], NULL, 10);
         } else if (strcmp(argv[i], "--bin-count") == 0) {
             if (++i >= argc) {
                 fprintf(stderr, "Error: --bin-count requires an argument\n");
