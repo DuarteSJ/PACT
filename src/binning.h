@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 /* Copyright (c) 2026 MoatLab, Virginia Tech. */
-/* binning.h — adaptive binning helpers (Algorithm 2). */
+/* binning.h — adaptive binning helpers (Algorithm 3). */
 
 #ifndef PACT_BINNING_H
 #define PACT_BINNING_H

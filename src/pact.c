@@ -305,7 +305,7 @@ static inline void apply_sample_to_meta(pact_context_t *pact, pac_metadata_t *me
     }
 }
 
-/* Per-sample reservoir update (Algorithm 2). */
+/* Per-sample reservoir update (Algorithm 3). */
 static inline void update_sample_reservoir(reservoir_t *res, pac_metadata_t *meta)
 {
     reservoir_add_sample(res, (double)meta->pac_value);

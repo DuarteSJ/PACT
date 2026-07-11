@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 /* Copyright (c) 2026 MoatLab, Virginia Tech. */
 
-/* binning.c — adaptive binning (Freedman-Diaconis), Algorithm 2. */
+/* binning.c — adaptive binning (Freedman-Diaconis), Algorithm 3. */
 
 #include <math.h>
 #include <stddef.h>
@@ -10,8 +10,7 @@
 
 #include "pact.h"
 #include "binning.h"
-#include "config.h" /* PACT_TOP_K_SIZE — not used here, but symmetric */
-#include "tsc.h"    /* rdtsc */
+#include "tsc.h" /* rdtsc */
 
 /* TH_SCALE threshold for bin-width doubling/halving. */
 #ifndef PACT_BINNING_TH_SCALE
@@ -105,12 +104,12 @@ void update_bin_width(pact_context_t *pact)
     bin->q1 = q1;
     bin->q3 = q3;
 
-    /* Pressure adjust (Algorithm 2): scale up if the table is much
+    /* Pressure adjust (Algorithm 3): scale up if the table is much
      * larger than the promotion-candidate set (most pages cold → widen
      * bins to compress the long tail). N_c is the migration ring fill. */
     size_t n_c = wl->migration_ring ? ring_buffer_migration_entry_size(wl->migration_ring) : 0;
     if (n_c > 0) {
-        if (n / n_c > PACT_BINNING_TH_SCALE) {
+        if ((double)n / (double)n_c > PACT_BINNING_TH_SCALE) {
             new_width = 2 * new_width;
         } else {
             new_width = new_width / 2;
