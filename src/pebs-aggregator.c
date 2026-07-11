@@ -195,10 +195,10 @@ static int read_cpu_pebs_events(pebs_aggregator_t *agg, per_cpu_state_t *cpu_sta
 
 /* Aggregate PEBS events from all CPUs and push directly to PAC update ring */
 /* Per-sample stall attribution = the cycle's per-tier scalar.
- * PEBS_ENCODE_PAC packs the PAC value into 16 bits, so clamp to 65535 here:
+ * PEBS_ENCODE_PAC packs the PAC value into 18 bits, so clamp to 262143 here:
  * a larger value would be silently truncated by the encoder and corrupt the
  * PAC score. */
-#define PAC_VALUE_MAX 65535u
+#define PAC_VALUE_MAX 262143u
 static inline uint32_t compute_sample_stalls(uint8_t tier, double fast_stalls, double slow_stalls)
 {
     double base = (tier == 0) ? fast_stalls : slow_stalls;

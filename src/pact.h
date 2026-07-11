@@ -99,30 +99,32 @@ typedef struct migration_entry {
 /* PEBS event encoding: assume 57 bits virtual addr, we use:
  * - 63-57, 7 bits: pac value (high)
  * - 56-12, 45 bits: page address (page-aligned)
- * - 11-3, 9 bits: pac value (low)
- * - 2-1, 2 bits: unused
+ * - 11-1, 11 bits: pac value (low)
  * - 0, 1 bit: tier (0=fast, 1=slow)
- * Total: 7+9=16 bits for PAC value, max value 65535 (sufficient for per-sample stalls)
- */
+ * Total: 7+11=18 bits for PAC value, max 262143. Per-sample stalls are
+ * ~k_cxl*period/MLP (~308K at period 400 and MLP 1), so 16 bits saturated
+ * for every window with slow-tier MLP < ~4.7 and under-weighted exactly
+ * the low-MLP phases the model marks as most latency-critical; 18 bits
+ * saturates only in the MLP~1 worst case. */
 #define PEBS_ENCODE_PAC(pac, page_addr, tier)                                                      \
     ({                                                                                             \
         uint32_t _pac = (uint32_t)(pac);                                                           \
         uint64_t _addr = ((uint64_t)(page_addr)) & PAGE_MASK;                                      \
         uint64_t _tier = (uint64_t)(tier) & 0x1ULL; /* 1 bit */                                    \
                                                                                                    \
-        uint64_t _pac_high = (_pac >> 9) & 0x7FULL; /* 7 bits */                                   \
-        uint64_t _pac_low = _pac & 0x1FFULL;        /* 9 bits */                                   \
+        uint64_t _pac_high = (_pac >> 11) & 0x7FULL; /* 7 bits */                                  \
+        uint64_t _pac_low = _pac & 0x7FFULL;         /* 11 bits */                                 \
                                                                                                    \
         ((_pac_high << 57) | ((_addr >> PAGE_SHIFT) << 12) | /* Bits 56-12: page address */        \
-         (_pac_low << 3) |                                   /* Bits 11-3: pac_low */              \
+         (_pac_low << 1) |                                   /* Bits 11-1: pac_low */              \
          _tier);                                             /* Bit 0: tier */                     \
     })
 
 #define PEBS_DECODE_PAC(encoded)                                                                   \
     ({                                                                                             \
         uint32_t _pac_high = ((encoded) >> 57) & 0x7FULL; /* 7 bits */                             \
-        uint32_t _pac_low = ((encoded) >> 3) & 0x1FFULL;  /* 9 bits */                             \
-        (_pac_high << 9) | _pac_low;                                                               \
+        uint32_t _pac_low = ((encoded) >> 1) & 0x7FFULL;  /* 11 bits */                            \
+        (_pac_high << 11) | _pac_low;                                                              \
     })
 
 /* PEBS address encoding: low 3 bits for metadata (addresses are page-aligned) */
