@@ -195,6 +195,25 @@ stays flat at zero, tiering is not active - re-check the kernel modules
 depend on the graph size, tier latency, and DRAM budget, so compare PACT against
 a baseline run on the *same* machine rather than to a fixed target.
 
+### A validation point (rough, for sanity only)
+
+For a rough idea of what a working run looks like, here are approximate
+`bc_kron_8t` numbers on the paper's hardware (CloudLab `c220g5`, scale-27
+Kronecker graph, 8 threads, ~1:1 fast:slow split, THP off). Runtime is
+`bc`'s reported average iteration time:
+
+| Configuration | Runtime | Slowdown vs local DRAM |
+|---|---|---|
+| All local DRAM (no split) | ~86 s | 1.00x (reference) |
+| **PACT** (1:1 split) | ~101 s | **1.16x** |
+| No tiering (1:1 split, pages stay where first-touched) | ~143 s | 1.65x |
+
+So on this machine PACT runs ~1.4x faster than leaving pages untiered and
+recovers about three-quarters of the gap back to all-local DRAM. **These are
+machine-specific and only a sanity anchor** - graph size, tier latency, and
+DRAM budget all shift them, so reproduce the *comparison* (PACT vs no-tiering
+on your own hardware), not these exact numbers.
+
 ## Quick-start checklist
 
 - [ ] Booted into the PACT kernel (`uname -r` shows `6.3.0`) - [`../setup/kernel/`](../setup/kernel/)
