@@ -152,7 +152,7 @@ dependencies.
 ```bash
 cd src
 make                 # produces ./pact
-make check-format    # optional: clang-format style check
+make check-format    # optional: clang-format style check (needs clang-format >= 16)
 ```
 
 See [`src/CODING_STYLE.md`](src/CODING_STYLE.md) for style conventions.
