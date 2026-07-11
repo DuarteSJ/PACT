@@ -11,14 +11,17 @@ Nomad tiering baseline, with its asynchronous-promotion kernel module.
 - `nomad_module/` - out-of-tree `async_promote` kernel module.
 
 ## Build (kernel)
-`compile.sh` expects a Linux git checkout in `./linux` (not bundled):
+`compile.sh` expects a Linux git checkout in `./linux` (not bundled). Clone it
+first, then build (kernel install + `update-grub` need root):
 
 ```bash
-cd nomad && ./compile.sh
+cd nomad
+git clone https://github.com/torvalds/linux.git linux   # 5.13-rc6 is a mainline tag
+sudo ./compile.sh
 ```
 
 The script runs: `git checkout 5.13-rc6` → `git apply nomad.patch` →
-`git apply nomad-alto.patch` → `make oldconfig` → `make -j` →
+`git apply nomad-alto.patch` → `make olddefconfig` → `make -j` →
 `make modules_install` → `make install` → `update-grub`.
 
 ## Build (async_promote module)

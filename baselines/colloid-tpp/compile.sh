@@ -20,8 +20,14 @@ for p in "${PATCHES[@]}"; do
     git apply "$p"
 done
 
-echo "make oldconfig ..."
-yes "" | make oldconfig > "$LOGF" 2>&1
+# Base the config on the running kernel, then resolve new symbols
+# non-interactively. (Do NOT pipe `yes` into `make oldconfig`: under
+# `set -o pipefail`, `yes` dies with SIGPIPE and aborts the build.)
+echo "configuring (olddefconfig) ..."
+if [[ -f "/boot/config-$(uname -r)" ]]; then
+    cp "/boot/config-$(uname -r)" .config
+fi
+make olddefconfig > "$LOGF" 2>&1
 echo "make ..."
 make -j "$(nproc)" >> "$LOGF" 2>&1
 echo "make INSTALL_MOD_STRIP=1 modules_install ..."
@@ -31,4 +37,4 @@ make install >> "$LOGF" 2>&1
 echo "update-grub ..."
 update-grub
 
-rm -f "$LOGF"
+echo "Build log: $LOGF"

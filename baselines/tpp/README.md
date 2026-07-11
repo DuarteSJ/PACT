@@ -9,15 +9,17 @@ Transparent Page Placement, evaluated as a tiering baseline.
   `update-grub`.
 
 ## Build
-`compile.sh` expects a Linux git checkout in `./linux` (not bundled). From a
-clone of the Linux stable tree placed at `tpp/linux`:
+`compile.sh` expects a Linux git checkout in `./linux` (not bundled). Clone it
+first, then build (kernel install + `update-grub` need root):
 
 ```bash
-cd tpp && ./compile.sh
+cd tpp
+git clone https://github.com/torvalds/linux.git linux   # v5.15 is a mainline tag
+sudo ./compile.sh
 ```
 
 The script runs: `git checkout v5.15` → `git apply tpp.patch` →
-`make oldconfig` → `make -j` → `make modules_install` → `make install` →
+`make olddefconfig` → `make -j` → `make modules_install` → `make install` →
 `update-grub`.
 
 ## Running a workload

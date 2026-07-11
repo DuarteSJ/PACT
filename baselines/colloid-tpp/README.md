@@ -16,14 +16,17 @@ Colloid tiering baseline. As noted in the parent
 - `kswapdrst/` - kswapd reset helper.
 
 ## Build
-`compile.sh` expects a Linux git checkout in `./linux` (not bundled):
+`compile.sh` expects a Linux git checkout in `./linux` (not bundled). Clone it
+first, then build (kernel install + `update-grub` need root):
 
 ```bash
-cd colloid-tpp && ./compile.sh
+cd colloid-tpp
+git clone https://github.com/torvalds/linux.git linux   # v6.3 is a mainline tag
+sudo ./compile.sh
 ```
 
 The script runs: `git checkout v6.3` → `git apply colloid-skx.patch` →
-`git apply colloid-skx-alto.patch` → `make oldconfig` → `make -j` →
+`git apply colloid-skx-alto.patch` → `make olddefconfig` → `make -j` →
 `make modules_install` → `make install` → `update-grub`.
 
 Build the helper tools (`colloid-mon/`, `tierinit/`, `kswapdrst/`) with the

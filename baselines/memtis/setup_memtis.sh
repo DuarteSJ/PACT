@@ -29,9 +29,12 @@ fi
 # 1. Clone Linux v5.15.19
 # ---------------------------------------------------------------------------
 echo "==> Fetching Linux v5.15.19 source..."
+# v5.15.19 is a STABLE point release: it lives in linux-stable, NOT in
+# torvalds/linux (which only tags mainline releases like v5.15). Clone the
+# stable tree.
 if [ ! -d "$KERNEL_DIR/.git" ]; then
     git clone --depth=1 --branch v5.15.19 \
-        https://github.com/torvalds/linux.git "$KERNEL_DIR"
+        https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git "$KERNEL_DIR"
 else
     echo "    Repo already exists, skipping clone."
 fi
@@ -39,7 +42,6 @@ fi
 cd "$KERNEL_DIR"
 
 echo "==> Checking out v5.15.19..."
-git fetch --tags --depth=1 origin tag v5.15.19 2>/dev/null || true
 git checkout v5.15.19
 
 # ---------------------------------------------------------------------------

@@ -21,14 +21,17 @@ own run scripts, use the upstream repository linked above.
 > comparator is reproduced independently.
 
 ## Build
-`compile.sh` expects a Linux git checkout in `./linux` (not bundled):
+`compile.sh` expects a Linux git checkout in `./linux` (not bundled). Clone it
+first, then build (kernel install + `update-grub` need root):
 
 ```bash
-cd soar-alto && ./compile.sh
+cd soar-alto
+git clone https://github.com/torvalds/linux.git linux   # v6.3 is a mainline tag
+sudo ./compile.sh
 ```
 
 The script runs: `git checkout v6.3` → `git apply colloid-skx.patch` →
-`git apply colloid-skx-alto.patch` → `make oldconfig` → `make -j` →
+`git apply colloid-skx-alto.patch` → `make olddefconfig` → `make -j` →
 `make modules_install` → `make install` → `update-grub`.
 
 ## Running a workload

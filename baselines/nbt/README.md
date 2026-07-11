@@ -9,14 +9,17 @@ NBT tiering baseline.
   `update-grub`.
 
 ## Build
-`compile.sh` expects a Linux git checkout in `./linux` (not bundled):
+`compile.sh` expects a Linux git checkout in `./linux` (not bundled). Clone it
+first, then build (kernel install + `update-grub` need root):
 
 ```bash
-cd nbt && ./compile.sh
+cd nbt
+git clone https://github.com/torvalds/linux.git linux   # v5.18 is a mainline tag
+sudo ./compile.sh
 ```
 
 The script runs: `git checkout v5.18` → `git apply nbt.patch` →
-`make oldconfig` → `make -j` → `make modules_install` → `make install` →
+`make olddefconfig` → `make -j` → `make modules_install` → `make install` →
 `update-grub`.
 
 ## Running a workload

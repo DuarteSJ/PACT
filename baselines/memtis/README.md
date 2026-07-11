@@ -36,13 +36,18 @@ sudo dnf install git gcc make bc bison flex elfutils-libelf-devel openssl-devel 
 
 ## Usage
 
+Memtis builds via `setup_memtis.sh` (not `compile.sh`). The script expects the
+kernel tree at `./linux`; `v5.15.19` is a **stable** point release, so clone the
+`linux-stable` tree (not `torvalds/linux`). The kernel install below needs root:
+
 ```bash
-chmod +x setup_memtis.sh
-./setup_memtis.sh
+cd memtis
+git clone https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git linux
+sudo ./setup_memtis.sh   # checks out tag v5.15.19
 ```
 
 The script will:
-1. Clone `torvalds/linux` at tag `v5.15.19` into `linux/`
+1. Clone `linux-stable` at tag `v5.15.19` into `linux/`
 2. Apply `memtis.patch` (sets `EXTRAVERSION = -htmm`)
 3. Copy `config` as the base `.config`
 4. Run `make olddefconfig` to resolve any new symbols

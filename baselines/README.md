@@ -11,7 +11,8 @@ This directory contains runtime configuration scripts and run scripts for baseli
 | **Nomad** | Non-exclusive Memory Tiering - OSDI'24 |
 | **Colloid** | Access Latency is Key! - SOSP'24 |
 | **Memtis** | Hardware-counter-driven tiered memory using PEBS for per-page access profiling and frequency-based migration - SOSP'23. [memtis/](memtis/) |
-| **Soar/Alto** | AOL-based Layered Tiering Orchestrationand and Static Object Allocation based on Ranking - OSDI'25. [Paper](https://www.usenix.org/conference/osdi25/presentation/liu) · [Code](https://github.com/MoatLab/SoarAlto) |
+| **Soar/Alto** | AOL-based Layered Tiering Orchestration and Static Object Allocation based on Ranking - OSDI'25. [Paper](https://www.usenix.org/conference/osdi25/presentation/liu) · [Code](https://github.com/MoatLab/SoarAlto) |
+
 ## Per-system directories
 
 Each baseline lives in its own subdirectory with a kernel patch, a
@@ -28,8 +29,9 @@ Each baseline lives in its own subdirectory with a kernel patch, a
 
 ## Notes
 
-* `Colloid` in our work refers to `Colloid-tpp`, though the Colloid paper
-  actually uses NBT (NUMA-Balancing-Tiering) in Linux v6.3.
+* `Colloid` in our work refers to `Colloid-tpp`: we reproduce Colloid on the
+  TPP path at Linux v6.3. (The original Colloid paper evaluates on NBT, NUMA
+  Balancing Tiering.)
 * These directories ship the kernel patches and build scripts. They do not
   include per-system workload run wrappers; boot the patched kernel and drive
   workloads with your own launcher (PACT's own runner is in [`../`](../)).

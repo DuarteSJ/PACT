@@ -14,10 +14,22 @@ LOGF="$SCRIPT_DIR/log"
 cd "$KERNEL_DIR"
 git checkout v5.18
 echo "Applying $(basename "$PATCH") ..."
-git apply "$PATCH"
+# Idempotent: skip if the patch is already applied (so a re-run after a
+# later failure does not abort at `git apply`).
+if git apply --reverse --check "$PATCH" >/dev/null 2>&1; then
+    echo "  (already applied, skipping)"
+else
+    git apply "$PATCH"
+fi
 
-echo "make oldconfig ..."
-yes "" | make oldconfig > "$LOGF" 2>&1
+# Base the config on the running kernel, then resolve new symbols
+# non-interactively. (Do NOT pipe `yes` into `make oldconfig`: under
+# `set -o pipefail`, `yes` dies with SIGPIPE and aborts the build.)
+echo "configuring (olddefconfig) ..."
+if [[ -f "/boot/config-$(uname -r)" ]]; then
+    cp "/boot/config-$(uname -r)" .config
+fi
+make olddefconfig > "$LOGF" 2>&1
 echo "make ..."
 make -j "$(nproc)" >> "$LOGF" 2>&1
 echo "make INSTALL_MOD_STRIP=1 modules_install ..."
@@ -27,4 +39,4 @@ make install >> "$LOGF" 2>&1
 echo "update-grub ..."
 update-grub
 
-rm -f "$LOGF"
+echo "Build log: $LOGF"
