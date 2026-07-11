@@ -1,0 +1,46 @@
+cff-version: 1.2.0
+message: "If you use PACT, please cite the ASPLOS 2026 paper below."
+title: "PACT: A Criticality-First Design for Tiered Memory"
+abstract: >-
+  PACT is a user-space Linux runtime for tiered memory. It attaches to an
+  unmodified process and places pages by the CPU stall time they cause (their
+  Per-page Access Criticality, PAC) rather than by access frequency alone,
+  combining PEBS sampling, per-tier memory-level-parallelism estimates,
+  adaptive binning, and kernel page migration.
+type: software
+repository-code: "https://github.com/MoatLab/PACT"
+license: MIT
+authors:
+  - family-names: Hadian
+    given-names: Hamid
+    affiliation: "Virginia Tech"
+  - family-names: Liu
+    given-names: Jinshu
+    affiliation: "Virginia Tech"
+  - family-names: Xu
+    given-names: Hanchen
+    affiliation: "Virginia Tech"
+  - family-names: Idden
+    given-names: Hansen
+    affiliation: "Virginia Tech"
+  - family-names: Li
+    given-names: Huaicheng
+    affiliation: "Virginia Tech"
+preferred-citation:
+  type: conference-paper
+  title: "PACT: A Criticality-First Design for Tiered Memory"
+  year: 2026
+  collection-title: >-
+    Proceedings of the 31st ACM International Conference on Architectural
+    Support for Programming Languages and Operating Systems (ASPLOS)
+  authors:
+    - family-names: Hadian
+      given-names: Hamid
+    - family-names: Liu
+      given-names: Jinshu
+    - family-names: Xu
+      given-names: Hanchen
+    - family-names: Idden
+      given-names: Hansen
+    - family-names: Li
+      given-names: Huaicheng
