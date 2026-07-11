@@ -8,9 +8,9 @@
  * become inline no-ops that the compiler can completely eliminate.
  *
  * Usage:
- *   make                           # Logging disabled (zero overhead)
- *   make ENABLE_LOGGING=1          # Logging enabled
- *   make debug                     # Logging enabled (debug builds)
+ *   make            # Logging disabled (zero overhead); the default build
+ *                   # excludes logging.c, so -l/--logging is a no-op.
+ *   make logging    # Rebuild with PACT_ENABLE_LOGGING; -l/--logging works.
  */
 
 #ifndef PACT_LOGGING_H

@@ -8,8 +8,8 @@ listed below.
 
 | Command | What it does | Requires |
 |---|---|---|
-| `make check-style` | Fast grep-based gate for the most common brace violations. Runs in CI. | bash only |
-| `make check-format` | Full clang-format `--dry-run`. CI gate. Falls back to `check-style` if clang-format is absent. | `clang-format` ≥ 16 |
+| `make check-style` | Coarse grep-based check that catches the most common **same-line** brace mistakes (`if (c) stmt;`, `else stmt;`) - not next-line braceless bodies or `for`/`while`. Runs in CI (`.github/workflows/ci.yml`). | bash + standard GNU utilities (grep, sed) |
+| `make check-format` | Full clang-format `--dry-run` - the complete style gate. CI gate. Picks `clang-format-18` automatically when the unversioned binary is absent; errors with instructions if neither exists. | `clang-format` ≥ 16 |
 | `make format` | Apply clang-format in-place across all `src/*.{c,h}` (excludes `khashl.h`, `minicoro.h`). | `clang-format` ≥ 16 |
 
 Install on Ubuntu/Debian:
@@ -28,8 +28,9 @@ chmod +x .git/hooks/pre-commit
 ## The rules that the grep gate catches
 
 These are the violations the project has historically slipped on. The
-gate fails the build on any occurrence in `src/*.{c,h}` (excluding
-vendored headers).
+grep gate only sees **same-line** cases in `src/*.{c,h}` (excluding
+vendored headers); `make check-format` (clang-format) is the complete
+gate and catches the rest.
 
 ### 1. Braces required on all if/else bodies - except top-of-function guards
 

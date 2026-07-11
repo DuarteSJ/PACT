@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  build-and-style:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libnuma-dev clang-format-18
+
+      - name: Build
+        run: make -C src
+
+      - name: Build (logging variant)
+        run: make -C src logging
+
+      - name: Brace-style check
+        run: make -C src check-style
+
+      - name: clang-format check
+        run: make -C src check-format CLANG_FORMAT=clang-format-18

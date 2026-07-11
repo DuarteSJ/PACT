@@ -18,11 +18,18 @@
 # Run `make format` (requires clang-format >= 16) for full mechanical fixes.
 
 set -euo pipefail
-cd "$(dirname "$0")/.."
+# Resolve symlinks (the documented pre-commit setup symlinks this script
+# into .git/hooks/, where a plain dirname would land in .git/ and the
+# globs below would silently match nothing).
+cd "$(dirname "$(readlink -f "$0")")/.."
 
 SRC=src
+if [[ ! -d $SRC ]]; then
+    echo "check-style: cannot find $SRC/ from $PWD" >&2
+    exit 2
+fi
 violations=0
-RED='\033[31m'; RST='\033[0m'; [ -t 2 ] || { RED=''; RST=''; }
+RED='\033[31m'; RST='\033[0m'; [[ -t 2 ]] || { RED=''; RST=''; }
 
 # Files exempt from the check (third-party vendored headers).
 EXCLUDE_RE='/(khashl|minicoro)\.h$'
@@ -68,7 +75,7 @@ while IFS=: read -r file line text; do
 done < <(grep -nE '(^\s*else|\}[[:space:]]*else)[[:space:]]+[a-zA-Z_]' \
          "$SRC"/*.c "$SRC"/*.h 2>/dev/null)
 
-if [ "$violations" -eq 0 ]; then
+if (( violations == 0 )); then
     echo "check-style: PASS — no same-line brace violations found."
     echo
     echo "Note: this is a coarse grep-based check. For full coverage run:"
