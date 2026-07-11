@@ -41,8 +41,13 @@ Four hardware counters collected per run (single `perf stat` pass):
 | `OFFCORE_REQUESTS_OUTSTANDING.DEMAND_DATA_RD` | MLP numerator |
 | `OFFCORE_REQUESTS_OUTSTANDING.CYCLES_WITH_DEMAND_DATA_RD` | MLP denominator |
 
-Derived metrics written to CSV:
+MLP here is `OFFCORE_REQUESTS_OUTSTANDING.DEMAND_DATA_RD / ...CYCLES...`, an
+offcore-outstanding proxy used only to fit the offline model. The PACT
+*runtime* derives per-tier MLP from CHA/TOR occupancy counters instead (see
+`src/pmu.c`); both estimate memory-level parallelism.
 
+Derived metrics written to CSV (per tier): `l3_stall`, `l3_miss`, `mlp`,
+`l3_miss/mlp`, and `lat * l3_miss/mlp` (the model's predicted stalls).
 
 > **Note:** Counter names and the model constants in `corr.plot` are calibrated
 > for Intel Skylake-X (SKX). See `skx/` for the complete reference dataset.
@@ -76,6 +81,17 @@ numactl --hardware
 Edit `CPU_NODE`, `LOCAL_NODE`, `NUMA_NODE`, `CXL_NODE` at the top of `run-models.sh`
 to match your server.
 
+> **Topology note.** The Figure-3 model spans **three** latency tiers (local
+> DRAM ~90 ns = `LOCAL_NODE`, remote NUMA ~140 ns = `NUMA_NODE`, CXL-emulated
+> ~190 ns = `CXL_NODE`), so it wants three distinct NUMA nodes. The runtime
+> tiering setup in [`../setup/`](../setup/) is a **two-node** fast/slow layout
+> and does not provide the third tier. On a two-node machine, point both
+> `NUMA_NODE` and `CXL_NODE` at the same slow node and collect the two tiers you
+> have (the model still fits on 2 points per workload), or use the shipped
+> reference data in `skx/dat/` to regenerate the plot without re-collecting
+> (see "Previously gathered data"). Do not treat a run with a missing node as a
+> full three-tier collection - the absent tier's columns are recorded as zeros.
+
 ### 2. Run SPEC CPU 2017 workloads
 
 ```bash
@@ -95,7 +111,7 @@ Graph is preloaded into the target NUMA node's page cache via `vmtouch` before e
 
 
 
-### 5. Plot
+### 4. Plot
 
 Copy the collected CSV to the gnuplot data folder, then run the plot:
 
@@ -145,4 +161,7 @@ no need to add `numactl` inside the command.
 - `vmtouch` - `apt install vmtouch` (GAPBS graph preloading)
 - `perf` - patched perf built by `setup/perf/install-perf.sh`; override its location with `PERF=/path/to/perf ./run-models.sh` (defaults to `perf` in `$PATH`)
 - `gnuplot` - required only for plotting, not for data collection
-- Workload binaries installed and paths configured in `run-models.sh`
+- Workload binaries installed and paths configured in `run-models.sh`. The
+  GAPBS runs use the same `kron.sg` graph as `run/` - generate the paper's
+  scale-27 graph as described in [`../run/README.md`](../run/README.md)
+  ("Obtaining the datasets").

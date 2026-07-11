@@ -43,7 +43,9 @@ SPEC_WORKLOADS=(
 # Override with: GAPBS_DIR=/path/to/gapbs ./run-models.sh
 GAPBS_DIR="${GAPBS_DIR:-/path/to/gapbs}"
 GAPBS_GRAPH_DIR="${GAPBS_DIR}/benchmark/graphs"
-VMTOUCH="/usr/bin/vmtouch"
+# vmtouch preloads the graph into the page cache. Override with:
+# VMTOUCH=/path/to/vmtouch ./run-models.sh   (default: vmtouch in PATH)
+VMTOUCH="${VMTOUCH:-vmtouch}"
 
 GAPBS_WORKLOADS=(
     "bc-kron"
@@ -220,7 +222,11 @@ func_write_csv() {
     fi
 
     local idx skipped=0
-    idx=$(grep -c "^[0-9]" "${OUTPUT_CSV}" 2>/dev/null || echo 0)
+    # Row index = count of data rows already in the CSV. grep -c prints "0" AND
+    # exits 1 on a header-only file, so `|| echo 0` would make idx="0\n0" and
+    # break the printf/arithmetic below; capture then default instead.
+    idx=$(grep -c "^[0-9]" "${OUTPUT_CSV}" 2>/dev/null) || true
+    idx=${idx:-0}
 
     local all_names=()
     [[ "${RUN_SPEC}"  == true ]] && for entry in "${SPEC_WORKLOADS[@]}";  do all_names+=("${entry%%|*}"); done

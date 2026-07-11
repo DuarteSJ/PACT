@@ -61,7 +61,7 @@ DATAFILE u ($16/(10000000000)):($4/(1000000000000)) w p pt 9 ps 1 lc rgb mthree 
 unset ylabel
 unset xlabel
 set origin .46,0
-set title "[c] NUMA (190ns)" offset 0,-.5
+set title "[c] CXL (190ns)" offset 0,-.5
 
 plot \
 DATAFILE u ($11/(10000000000)):($5/(1000000000000)) w p pt 7 ps 1 lc rgb "gray" t "LLC-miss", \
