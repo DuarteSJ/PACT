@@ -285,12 +285,10 @@ static pac_metadata_t *create_pac_entry(pact_context_t *pact, pac_table_t *table
 /* Apply this sample to an existing PAC entry: bump PAC value / access count,
  * handle tier transitions, and stamp the per-tier "sampled" flags. */
 static inline void apply_sample_to_meta(pact_context_t *pact, pac_metadata_t *meta, uint64_t stalls,
-                                        uint8_t tier, uint64_t cached_tsc)
+                                        uint8_t tier)
 {
     meta->pac_value += stalls;
     meta->access_count += 1;
-    meta->last_reset_tsc = cached_tsc;
-    meta->last_reset_count = pact->sample_counts;
 
     if (tier != meta->tier) {
         handle_tier_change(pact, meta, tier);
@@ -323,14 +321,6 @@ static inline bool should_enter_promotion_pq(pac_metadata_t *meta, binning_state
 void update_pac_entry(pact_context_t *pact, uint64_t page_addr, uint64_t stalls, uint8_t tier,
                       pid_t pid)
 {
-    /* TSC cache: rdtsc() is ~20 cycles; refresh once per 1000 samples. */
-    static __thread uint64_t cached_tsc = 0;
-    static __thread uint64_t tsc_update_count = 0;
-    if (++tsc_update_count >= 1000) {
-        cached_tsc = rdtsc();
-        tsc_update_count = 0;
-    }
-
     pac_table_t *table;
     reservoir_t *res;
     binning_state_t *bin;
@@ -354,7 +344,7 @@ void update_pac_entry(pact_context_t *pact, uint64_t page_addr, uint64_t stalls,
         }
     }
 
-    apply_sample_to_meta(pact, meta, stalls, tier, cached_tsc);
+    apply_sample_to_meta(pact, meta, stalls, tier);
 
 #ifdef PACT_PROFILE
     pact->workload->stats.metadata_update_cycles += rdtsc() - hash_start;
@@ -379,7 +369,7 @@ void update_pac_entry(pact_context_t *pact, uint64_t page_addr, uint64_t stalls,
          * double-enqueue; migration thread clears it after numa_move_pages. */
         meta->migrating = true;
         ring_buffer_migration_entry_t *ring = pact->workload->migration_ring;
-        migration_entry_t entry = {.meta = meta, .target_node = 0, .enqueue_tsc = cached_tsc};
+        migration_entry_t entry = {.meta = meta, .target_node = 0};
         if (ring_buffer_migration_entry_push(ring, entry)) {
             atomic_inc_relaxed(&pact->workload->stats.promotion_attempts);
         } else {

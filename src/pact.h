@@ -31,24 +31,28 @@
 typedef struct mco_coro mco_coro;
 /* pact_context_t is forward-declared in pmu.h (included above) */
 
-/* PAC metadata structure - must be defined here for SIMD header */
+/*
+ * PAC metadata. The tier/flag bytes are updated concurrently by the
+ * sampling path and the migration thread; each is an _Atomic byte so a
+ * store is its own memory location. (As bitfields they shared one word,
+ * so one thread's read-modify-write could erase the other's update —
+ * e.g. a lost migrating=0 permanently blocks re-enqueue.)
+ */
 typedef struct pac_metadata {
-    uint64_t page_addr;             /* Page virtual address */
-    pid_t pid;                      /* Owner process ID */
-    uint64_t pac_value;             /* Accumulated PAC score */
-    uint32_t access_count;          /* Access frequency */
-    uint32_t tier : 2;              /* Current memory tier */
-    uint32_t migrating : 1;         /* Migration in progress */
-    uint32_t promoted_by_pact : 1;  /* Whether the page was promoted by PACT */
-    uint32_t promoted_by_other : 1; /* Promoted by non-PACT mechanism (currently unused) */
-    uint32_t demoted_by_pact : 1;   /* Whether the page was demoted by PACT */
-    uint32_t demoted_by_other : 1;  /* Whether the page was demoted */
-    uint32_t sampled_on_fast : 1;   /* Whether we've sampled this page on fast tier */
-    uint32_t sampled_on_slow : 1;   /* Whether we've sampled this page on slow tier */
-    uint32_t prev_tier : 2;         /* Previous tier location for ping-pong detection */
-    uint32_t reserved : 21;         /* Reserved bits */
-    uint64_t last_reset_tsc;        /* Last cooling reset timestamp */
-    uint64_t last_reset_count;      /* # of sampled pages when the page was last cooling-reset */
+    uint64_t page_addr;    /* Page virtual address */
+    pid_t pid;             /* Owner process ID */
+    uint64_t pac_value;    /* Accumulated PAC score */
+    uint32_t access_count; /* Access frequency */
+
+    _Atomic uint8_t tier;              /* Current memory tier */
+    _Atomic uint8_t prev_tier;         /* Previous tier (ping-pong detection) */
+    _Atomic uint8_t migrating;         /* Migration in progress */
+    _Atomic uint8_t promoted_by_pact;  /* Promoted by PACT */
+    _Atomic uint8_t promoted_by_other; /* Promoted by non-PACT mechanism */
+    _Atomic uint8_t demoted_by_pact;   /* Demoted by PACT */
+    _Atomic uint8_t demoted_by_other;  /* Demoted by non-PACT mechanism */
+    _Atomic uint8_t sampled_on_fast;   /* Sampled on fast tier */
+    _Atomic uint8_t sampled_on_slow;   /* Sampled on slow tier */
 } pac_metadata_t;
 
 /* Hash map type declarations - must be here for khash_t(pac) to work */
@@ -90,7 +94,6 @@ typedef enum {
 typedef struct migration_entry {
     pac_metadata_t *meta; /* Page metadata pointer (contains pid, page_addr) */
     int target_node;      /* Target NUMA node (0=fast, 1=slow) */
-    uint64_t enqueue_tsc; /* Timestamp for sojourn time measurement */
 } migration_entry_t;
 
 /* PEBS event encoding: assume 57 bits virtual addr, we use:
