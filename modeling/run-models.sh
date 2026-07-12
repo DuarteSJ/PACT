@@ -15,8 +15,8 @@ LOCAL_NODE=0    # Tier 1: local DRAM   (~90ns)
 NUMA_NODE=1     # Tier 2: remote NUMA  (~140ns)
 CXL_NODE=2      # Tier 3: CXL          (~190ns)
 
-# Patched perf binary built by setup/perf/install-perf.sh.
-# Override with: PERF=/path/to/perf ./run-models.sh   (default: perf in PATH)
+# Stock perf is enough — the four counters below are read from perf stat text
+# output. Override with: PERF=/path/to/perf ./run-models.sh (default: perf in PATH)
 PERF="${PERF:-perf}"
 
 # Four perf counters; all collected in a single perf stat pass

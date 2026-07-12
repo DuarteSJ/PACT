@@ -9,9 +9,6 @@ src/pact
 *.txt
 run/results/
 
-# perf build tree produced by setup/perf/install-perf.sh
-setup/perf/linux-5.15-pact/
-
 # Editor / OS cruft
 .DS_Store
 *.swp

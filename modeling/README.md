@@ -159,7 +159,7 @@ no need to add `numactl` inside the command.
 
 - `numactl` - `apt install numactl`
 - `vmtouch` - `apt install vmtouch` (GAPBS graph preloading)
-- `perf` - patched perf built by `setup/perf/install-perf.sh`; override its location with `PERF=/path/to/perf ./run-models.sh` (defaults to `perf` in `$PATH`)
+- `perf` - stock `perf` from `linux-tools`; the four counters are read from `perf stat` text output. Point at a specific build with `PERF=/path/to/perf ./run-models.sh` (defaults to `perf` in `$PATH`)
 - `gnuplot` - required only for plotting, not for data collection
 - Workload binaries installed and paths configured in `run-models.sh`. The
   GAPBS runs use the same `kron.sg` graph as `run/` - generate the paper's

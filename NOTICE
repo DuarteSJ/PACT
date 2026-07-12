@@ -21,8 +21,8 @@ License:    Public Domain or MIT-0 (No Attribution), at your option
 ------------------------------------------------------------------------------
 
 Linux kernel patches and out-of-tree kernel modules under baselines/ and
-setup/ (the kernel modules under setup/kernel/ and the perf patch under
-setup/perf/) are derivative works of the Linux kernel and are licensed under
-GPL-2.0, matching the kernel they modify. The upstream tiering systems they
-reproduce (TPP, Memtis, Colloid, NBT, Nomad, Soar/Alto) are the work of their
-respective authors; see each subdirectory's README for provenance.
+setup/ (the kernel modules under setup/kernel/) are derivative works of the
+Linux kernel and are licensed under GPL-2.0, matching the kernel they modify.
+The upstream tiering systems they reproduce (TPP, Memtis, Colloid, NBT, Nomad,
+Soar/Alto) are the work of their respective authors; see each subdirectory's
+README for provenance.

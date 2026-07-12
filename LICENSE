@@ -31,9 +31,9 @@ licenses; see the NOTICE file for the full list. In particular:
     original licenses. See NOTICE for provenance and license of each.
 
   * Linux kernel patches under baselines/ and setup/ (the kernel modules under
-    setup/kernel/ and the perf patch under setup/perf/) are derivative works of
-    the Linux kernel and are therefore governed by the GNU General Public
-    License, version 2 (GPL-2.0), the license of the kernel they patch.
+    setup/kernel/) are derivative works of the Linux kernel and are therefore
+    governed by the GNU General Public License, version 2 (GPL-2.0), the license
+    of the kernel they patch.
 
   * Documentation, figures, and data files are additionally available under
     the Creative Commons Attribution 4.0 International License (CC BY 4.0).

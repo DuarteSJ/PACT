@@ -63,8 +63,7 @@ PACT/
 ├── src/             # the PACT runtime (C source + Makefile)
 ├── setup/           # host bring-up - do this first
 │   ├── kernel/      #   build/boot Linux 6.3 + the tierinit & kswapdrst modules
-│   ├── env/         #   uncore-freq pinning, CXL/NUMA layout, governor, THP/KSM off
-│   └── perf/        #   build the PAC-patched perf used for PAC sampling
+│   └── env/         #   uncore-freq pinning, CXL/NUMA layout, governor, THP/KSM off
 ├── run/             # run PACT on a workload (run-pact.sh, workloads.sh)
 ├── baselines/       # SOTA systems we compare against (TPP, NBT, Nomad, Colloid, Memtis, Soar/Alto)
 └── modeling/        # PAC modeling scripts (Figure 3)
@@ -94,8 +93,9 @@ The artifact targets the same class of machine used in the paper:
   [`setup/kernel/`](setup/kernel/)). Baselines use their own kernel versions -
   see [`baselines/`](baselines/).
 - **Software:** `gcc`, `make`, `libnuma`, `numactl`, `vmtouch`, `gnuplot`
-  (plotting), and a patched `perf` built by
-  [`setup/perf/install-perf.sh`](setup/perf/install-perf.sh).
+  (plotting), and `perf` (the PAC modeling scripts in [`modeling/`](modeling/)
+  read counters via stock `perf stat`). The PACT runtime samples the PMU
+  directly through `perf_event_open` and needs no external `perf` binary.
 - **Privileges:** kernel install, module loading, and the environment-prep
   scripts require root.
 
@@ -215,7 +215,8 @@ constraints of the current implementation are worth knowing up front:
   CXL-like slow tier on a 2-NUMA-node host. More than two tiers, multi-socket
   fan-out, and multi-node setups are out of scope for this release.
 - **Hardware sampling required.** PAC profiling depends on PEBS plus CHA/uncore
-  occupancy counters and a PAC-patched `perf`, and the runtime must run as root.
+  occupancy counters (read directly via `perf_event_open`), and the runtime must
+  run as root.
 - **Attaches to a running, pre-pinned workload.** PACT manages an existing
   process by PID; it does not launch or CPU-pin workloads itself (the `run/`
   scripts handle that around it).
