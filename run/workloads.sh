@@ -83,9 +83,6 @@ seq_array_omp_threads=1
 seq_array_workload_cmd="cd ${UBENCH_DIR} && \$numactl_args timeout 200 ./seq_array 5120 10"
 
 # --- mb : random-access microbench, no dataset needed (pipeline smoke test).
-# Build once from run/mb.c:   cc -O2 -o "$MB_BIN" run/mb.c
-# MB_SIZE_GB is the footprint; keep it above the fast-tier (node0) size so
-# first-touch spills to the slow tier and PACT has pages to migrate.
 MB_BIN="${MB_BIN:-$HOME/mb}"
 MB_SIZE_GB="${MB_SIZE_GB:-80}"
 mb_pname="mb"
