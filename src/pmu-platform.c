@@ -11,8 +11,14 @@
 pmu_platform_t g_pmu_platform;
 
 /* Skylake Xeon CHA-to-core mapping (CloudLab c220g5) */
-static const int skx_cha_to_core_map[10] = {2, 3, 4, 5, 6, 7, 8, 9, 0, 1};
-static const int skx_core_to_tid[10] = {0x00, 0x10, 0x20, 0x30, 0x40, 0x08, 0x18, 0x28, 0x38, 0x48};
+// static const int skx_cha_to_core_map[10] = {2, 3, 4, 5, 6, 7, 8, 9, 0, 1};
+// static const int skx_core_to_tid[10] = {0x00, 0x10, 0x20, 0x30, 0x40, 0x08, 0x18, 0x28, 0x38, 0x48};
+
+/* Cascade Lake Xeon CHA-to-core mapping (nvram Xeon Gold 5218) */
+static const int skx_cha_to_core_map[16] = {-1, -1, -1, -1, -1, -1, -1, -1,
+                                            -1, -1, -1, -1, -1, -1, -1, -1};
+static const int skx_core_to_tid[16] = {0};
+
 
 /* TID goes into config1 (ORed with config1_base). */
 static void generic_fill_tor_config(const pmu_platform_t *plat, tor_pe_config_t *out, int event_idx,
@@ -64,7 +70,7 @@ static const pmu_platform_t platform_skx = {
     .name = "Skylake-X",
     .event_llc_miss_local = 0x01d3,
     .event_llc_miss_remote = 0x02d3,
-    .nr_cha_mapping = 10,
+    .nr_cha_mapping = 16,
     .cha_to_core_map = skx_cha_to_core_map,
     .core_to_tid = skx_core_to_tid,
     .tor_base =
